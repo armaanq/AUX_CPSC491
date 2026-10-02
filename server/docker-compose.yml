@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aux
+      POSTGRES_PASSWORD: aux
+      POSTGRES_DB: aux
+    ports:
+      - '5432:5432'
+    volumes:
+      - aux_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  aux_postgres_data:
