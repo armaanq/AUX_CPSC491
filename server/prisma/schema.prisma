@@ -1,7 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// AUX database schema. Connection URL lives in prisma7.config.ts (DATABASE_URL).
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +7,160 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// Values match the mobile app's types exactly (src/api/songs.ts, src/data/prototype.ts).
+enum CatalogSource {
+  musicbrainz
+  spotify
+}
+
+enum Sentiment {
+  LOVED
+  FINE
+  DISLIKED
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+}
+
+model User {
+  id             String   @id @default(uuid()) @db.Uuid
+  email          String   @unique
+  username       String   @unique
+  passwordHash   String
+  bio            String   @default("")
+  avatarUrl      String?
+  favoriteGenres String[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  rankings         Ranking[]
+  saved            Saved[]
+  favorites        Favorite[]
+  sentRequests     Friendship[] @relation("FriendshipRequester")
+  receivedRequests Friendship[] @relation("FriendshipAddressee")
+}
+
+// A song is created the first time any user ranks, saves, or favorites it
+// (POST /songs/resolve), not imported in bulk from MusicBrainz.
+model Song {
+  id          String        @id @default(uuid()) @db.Uuid
+  source      CatalogSource
+  externalId  String
+  title       String
+  artist      String
+  albumId     String?       @db.Uuid
+  releaseYear Int?
+  durationMs  Int?
+  isrc        String?
+  genre       String?
+  artworkUrl  String?
+  externalUrl String
+  createdAt   DateTime      @default(now())
+
+  album     Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  rankings  Ranking[]
+  saved     Saved[]
+  favorites Favorite[]
+
+  @@unique([source, externalId])
+  @@index([isrc])
+}
+
+// Albums can be browsed, saved, and favorited, but not ranked.
+// For MusicBrainz, externalId is the release-group MBID.
+model Album {
+  id          String        @id @default(uuid()) @db.Uuid
+  source      CatalogSource
+  externalId  String
+  title       String
+  artist      String
+  releaseYear Int?
+  genre       String?
+  artworkUrl  String?
+  externalUrl String
+  createdAt   DateTime      @default(now())
+
+  songs     Song[]
+  saved     Saved[]
+  favorites Favorite[]
+
+  @@unique([source, externalId])
+}
+
+// One row per song a user has ranked. Songs only, enforced by the foreign key.
+// `position` is the 0-based spot inside the sentiment band (0 = best);
+// `score` is derived from it (see scoreFor in the mobile app) and stored so
+// global charts and taste matching can query it directly.
+model Ranking {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  songId    String    @db.Uuid
+  sentiment Sentiment
+  position  Int
+  score     Float
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@index([userId, sentiment, position])
+  @@index([songId])
+  @@index([createdAt])
+}
+
+// "Listen later" list. Exactly one of songId / albumId is set.
+model Saved {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  songId    String?  @db.Uuid
+  albumId   String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song  Song?  @relation(fields: [songId], references: [id], onDelete: Cascade)
+  album Album? @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@unique([userId, albumId])
+}
+
+// Pinned favorites shown on a profile, in display order. Exactly one of
+// songId / albumId is set.
+model Favorite {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  songId    String?  @db.Uuid
+  albumId   String?  @db.Uuid
+  position  Int
+  createdAt DateTime @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  song  Song?  @relation(fields: [songId], references: [id], onDelete: Cascade)
+  album Album? @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, songId])
+  @@unique([userId, albumId])
+}
+
+// A friend request from requester to addressee; ACCEPTED means they're friends.
+// The API must check both directions so A→B and B→A can't both exist.
+model Friendship {
+  id          String           @id @default(uuid()) @db.Uuid
+  requesterId String           @db.Uuid
+  addresseeId String           @db.Uuid
+  status      FriendshipStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  acceptedAt  DateTime?
+
+  requester User @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
 }
