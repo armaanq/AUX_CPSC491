@@ -17,7 +17,8 @@ import { normalizeQuery, tokenize } from './musicbrainz/query.js';
 import { TtlCache } from './ttl-cache.js';
 
 export const MIN_QUERY_LENGTH = 2;
-const MAX_RESULTS = 15;
+// Up to 50 songs; searching an artist ("migos") needs room for their catalog.
+const MAX_RESULTS = 50;
 const HOUR = 60 * 60 * 1000;
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

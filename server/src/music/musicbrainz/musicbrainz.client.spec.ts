@@ -33,7 +33,7 @@ describe('MusicBrainzClient', () => {
     const u = new URL(url);
     expect(u.origin + u.pathname).toBe('https://mb.test/ws/2/recording');
     expect(u.searchParams.get('fmt')).toBe('json');
-    expect(u.searchParams.get('limit')).toBe('25');
+    expect(u.searchParams.get('limit')).toBe('100');
     expect(u.searchParams.get('query')).toContain('artist:"frank"');
     expect((init.headers as Record<string, string>)['User-Agent']).toBe('AUX-test/1.0 ( test@example.com )');
   });

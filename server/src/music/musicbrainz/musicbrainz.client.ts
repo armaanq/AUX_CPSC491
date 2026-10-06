@@ -33,8 +33,12 @@ export class MusicBrainzClient {
     }
   }
 
-  /** Song search. Returns recordings in MusicBrainz relevance order. */
-  async searchRecordings(text: string, limit = 25): Promise<MbRecording[]> {
+  /**
+   * Song search. Returns recordings in MusicBrainz relevance order. Asks for
+   * 100 (the API maximum) because one song appears once per release, so ~100
+   * recordings collapse to a few dozen distinct songs. Still one request.
+   */
+  async searchRecordings(text: string, limit = 100): Promise<MbRecording[]> {
     const query = buildRecordingQuery(text);
     if (!query) return [];
     const params = new URLSearchParams({ query, limit: String(limit), fmt: 'json' });
