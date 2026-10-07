@@ -9,34 +9,28 @@ import React, {
 import { ActivityIndicator, Text, View } from 'react-native';
 import {
   findMusic,
-  initialRankings,
-  insertRanking,
   isCatalogMusic,
   music,
   registerMusic,
   people,
-  SENTIMENT_ORDER,
   type Music,
-  type Ranking,
-  type Sentiment,
 } from '../data/prototype';
 export type Connection = 'friends' | 'incoming' | 'outgoing';
+// Rankings live on the server now (see RankingsProvider); this is the rest of
+// the prototype state, still kept on the device.
 type State = {
-  version: 3;
-  // Real catalog songs the user ranked, saved or pinned, kept so they still
+  version: 4;
+  // Real catalog songs the user saved or pinned, kept so they still
   // display after a restart (demo songs are built into the app).
   library: Music[];
-  rankings: Ranking[];
   saved: string[];
   favorites: string[];
   connections: Record<string, Connection>;
   bio: string;
-  activity: string[];
 };
 const initial: State = {
-  version: 3,
+  version: 4,
   library: [],
-  rankings: initialRankings,
   saved: ['a0', 'a3'],
   favorites: ['t7', 't4', 't2'],
   connections: {
@@ -45,14 +39,18 @@ const initial: State = {
     'u-maya': 'incoming',
   },
   bio: 'A little R&B. A lot of repeat listens.',
-  activity: [],
 };
 // v2: rankings carry a sentiment and are songs only.
 // v3: adds `library` for real catalog songs.
+// v4: rankings (and the activity list) moved to the server.
 // Bumping the key means phones with older data start fresh instead of
 // failing to load it.
-const key = '@aux/prototype/v3';
-const legacyKeys = ['@aux/prototype/v1', '@aux/prototype/v2'];
+const key = '@aux/prototype/v4';
+const legacyKeys = [
+  '@aux/prototype/v1',
+  '@aux/prototype/v2',
+  '@aux/prototype/v3',
+];
 /** Adds a catalog song to the library the first time the user acts on it. */
 function remember(library: Music[], id: string): Music[] {
   const item = findMusic(id);
@@ -67,23 +65,12 @@ export function validState(value: unknown): value is State {
     Array.isArray(v) &&
     v.every(id => typeof id === 'string' && music.some(m => m.id === id));
   return (
-    s.version === 3 &&
+    s.version === 4 &&
     Array.isArray(s.library) &&
     s.library.every(isCatalogMusic) &&
     typeof s.bio === 'string' &&
     ids(s.saved) &&
     ids(s.favorites) &&
-    ids(s.activity) &&
-    Array.isArray(s.rankings) &&
-    s.rankings.every(
-      r =>
-        r &&
-        music.some(m => m.id === r.musicId && m.kind === 'song') &&
-        SENTIMENT_ORDER.includes(r.sentiment) &&
-        Number.isFinite(r.score) &&
-        r.score >= 0 &&
-        r.score <= 10,
-    ) &&
     !!s.connections &&
     typeof s.connections === 'object' &&
     Object.entries(s.connections).every(
@@ -99,7 +86,8 @@ type API = {
   toggleSaved: (id: string) => void;
   toggleFavorite: (id: string) => void;
   connect: (id: string, action: 'request' | 'accept' | 'remove') => void;
-  rank: (id: string, sentiment: Sentiment, index: number) => void;
+  /** Takes a song off the listening queue (e.g. once it's ranked). */
+  unsave: (id: string) => void;
   setBio: (bio: string) => void;
 };
 const Context = createContext<API | null>(null);
@@ -190,21 +178,11 @@ export function PrototypeProvider({ children }: { children: React.ReactNode }) {
               connections[id] = 'outgoing';
             return { ...s, connections };
           }),
-        rank: (id, sentiment, index) =>
+        unsave: id =>
           setState(s =>
-            // Only songs can be ranked; ignore anything else.
-            findMusic(id)?.kind !== 'song'
-              ? s
-              : {
-                  ...s,
-                  library: remember(s.library, id),
-                  rankings: insertRanking(s.rankings, id, sentiment, index),
-                  saved: s.saved.filter(x => x !== id),
-                  activity: [id, ...s.activity.filter(x => x !== id)].slice(
-                    0,
-                    20,
-                  ),
-                },
+            s.saved.includes(id)
+              ? { ...s, saved: s.saved.filter(x => x !== id) }
+              : s,
           ),
         setBio: bio => setState(s => ({ ...s, bio })),
       }}

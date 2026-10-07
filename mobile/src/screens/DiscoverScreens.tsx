@@ -16,6 +16,7 @@ import {
   type Music,
 } from '../data/prototype';
 import { usePrototype } from '../state/PrototypeProvider';
+import { useRankings } from '../state/RankingsProvider';
 import {
   Button,
   Chips,
@@ -32,6 +33,7 @@ const useNav = () =>
 export function HomeScreen() {
   const nav = useNav();
   const { state } = usePrototype();
+  const { rankings, recent } = useRankings();
   const open = (musicId: string) => nav.navigate('MusicDetail', { musicId });
   const activity = people.filter(p => state.connections[p.id] === 'friends');
   return (
@@ -75,9 +77,7 @@ export function HomeScreen() {
       <Shelf
         items={music
           .filter(
-            m =>
-              m.kind === 'album' &&
-              !state.rankings.some(r => r.musicId === m.id),
+            m => m.kind === 'album' && !rankings.some(r => r.musicId === m.id),
           )
           .slice(0, 6)}
         onPress={open}
@@ -92,12 +92,12 @@ export function HomeScreen() {
           <Text style={ui.link}>Find friends ↗</Text>
         </Pressable>
       </View>
-      {state.activity.slice(0, 3).map(id => (
+      {recent.slice(0, 3).map(id => (
         <View key={id} style={ui.card}>
-          <Text style={ui.label}>YOU RANKED · THIS DEVICE</Text>
+          <Text style={ui.label}>YOU RANKED</Text>
           <MusicRow
             item={findMusic(id)}
-            score={state.rankings.find(r => r.musicId === id)?.score}
+            score={rankings.find(r => r.musicId === id)?.score}
             onPress={() => open(id)}
           />
         </View>
@@ -284,6 +284,7 @@ export function MusicDetailScreen({
 }: NativeStackScreenProps<RootStackParamList, 'MusicDetail'>) {
   const nav = useNav();
   const { state, toggleSaved, toggleFavorite } = usePrototype();
+  const { rankings } = useRankings();
   const item = findMusic(route.params.musicId);
   if (!item)
     return (
@@ -294,7 +295,7 @@ export function MusicDetailScreen({
         />
       </Page>
     );
-  const ranking = state.rankings.find(r => r.musicId === item.id);
+  const ranking = rankings.find(r => r.musicId === item.id);
   const saved = state.saved.includes(item.id);
   const favorite = state.favorites.includes(item.id);
   return (
@@ -425,7 +426,7 @@ export function MusicDetailScreen({
 }
 export function GlobalRankingsScreen() {
   const nav = useNav();
-  const { state } = usePrototype();
+  const { rankings } = useRankings();
   const [genre, setGenre] = useState('All genres');
   const entries = music
     .filter(
@@ -434,7 +435,7 @@ export function GlobalRankingsScreen() {
     .map(m => {
       const ratings = [
         ...people.map(p => p.rankings.find(r => r.musicId === m.id)?.score),
-        state.rankings.find(r => r.musicId === m.id)?.score,
+        rankings.find(r => r.musicId === m.id)?.score,
       ].filter((v): v is number => v !== undefined);
       return {
         item: m,

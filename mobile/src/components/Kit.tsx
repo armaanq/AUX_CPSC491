@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { type Music } from '../data/prototype';
 import { usePrototype } from '../state/PrototypeProvider';
+import { useRankingsError } from '../state/RankingsProvider';
 export const palette = {
   paper: '#F8F6F1',
   ink: '#232822',
@@ -104,6 +105,7 @@ export function Page({
   insetTop?: boolean;
 }) {
   const { error } = usePrototype();
+  const rankingsError = useRankingsError();
   return (
     <SafeAreaView style={ui.page} edges={insetTop ? ['top'] : []}>
       <ScrollView
@@ -113,6 +115,14 @@ export function Page({
         {error && (
           <Text accessibilityRole="alert" style={ui.body}>
             {error}
+          </Text>
+        )}
+        {rankingsError && (
+          <Text
+            accessibilityRole="alert"
+            style={[ui.body, { color: palette.accent }]}
+          >
+            {rankingsError}
           </Text>
         )}
         {children}
