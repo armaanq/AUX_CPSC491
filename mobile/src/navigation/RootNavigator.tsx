@@ -1,8 +1,15 @@
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
+import {
+  LoginScreen,
+  SessionLoading,
+  SessionOffline,
+  SignupScreen,
+} from '../screens/AuthScreens';
 import { CompareScreen } from '../screens/CompareScreen';
 import { FriendProfileScreen } from '../screens/SocialScreens';
+import { useAuth } from '../state/AuthProvider';
 import { colors } from '../theme/theme';
 import { MusicDetailScreen } from '../screens/DiscoverScreens';
 import { MainTabs } from './MainTabs';
@@ -23,33 +30,46 @@ const navigationTheme = {
 };
 
 export function RootNavigator() {
+  const { status } = useAuth();
+  if (status === 'loading') return <SessionLoading />;
+  if (status === 'offline') return <SessionOffline />;
   return (
     <NavigationContainer theme={navigationTheme}>
+      {/* Logged-out users only have the login screens, so nothing else is reachable. */}
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="MainTabs" component={MainTabs} />
-        <Stack.Screen
-          name="MusicDetail"
-          component={MusicDetailScreen}
-          options={{
-            headerShown: true,
-            headerTitle: '',
-            headerBackTitle: 'Back',
-          }}
-        />
-        <Stack.Screen
-          name="Compare"
-          component={CompareScreen}
-          options={{ presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="FriendProfile"
-          component={FriendProfileScreen}
-          options={{
-            headerShown: true,
-            headerTitle: '',
-            headerBackTitle: 'Back',
-          }}
-        />
+        {status === 'signedIn' ? (
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen
+              name="MusicDetail"
+              component={MusicDetailScreen}
+              options={{
+                headerShown: true,
+                headerTitle: '',
+                headerBackTitle: 'Back',
+              }}
+            />
+            <Stack.Screen
+              name="Compare"
+              component={CompareScreen}
+              options={{ presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="FriendProfile"
+              component={FriendProfileScreen}
+              options={{
+                headerShown: true,
+                headerTitle: '',
+                headerBackTitle: 'Back',
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Signup" component={SignupScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

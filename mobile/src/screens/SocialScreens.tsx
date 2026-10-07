@@ -8,6 +8,7 @@ import type {
 import type { RootStackParamList } from '../navigation/types';
 import { findMusic, people, tasteMatch } from '../data/prototype';
 import { usePrototype } from '../state/PrototypeProvider';
+import { useAuth } from '../state/AuthProvider';
 import { Avatar } from '../components/Avatar';
 import {
   Button,
@@ -137,6 +138,7 @@ export function FriendProfileScreen({
 function ProfileContent({ friendId }: { friendId?: string }) {
   const nav = useNav();
   const { state, connect, setBio } = usePrototype();
+  const { user, logOut } = useAuth();
   const [tab, setTab] = useState('Songs');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(state.bio);
@@ -152,7 +154,7 @@ function ProfileContent({ friendId }: { friendId?: string }) {
       </Page>
     );
   const rankings = own ? state.rankings : person!.rankings;
-  const name = own ? 'armaanq' : person!.name;
+  const name = own ? user?.username ?? '' : person!.name;
   const status = friendId ? state.connections[friendId] : null;
   const favorites = own
     ? state.favorites
@@ -369,6 +371,18 @@ function ProfileContent({ friendId }: { friendId?: string }) {
             own
               ? 'Discover music and add it to your collection.'
               : 'This listener hasn’t ranked any songs yet.'
+          }
+        />
+      )}
+      {own && (
+        <Button
+          secondary
+          title="Log out"
+          onPress={() =>
+            Alert.alert('Log out of AUX?', `You're logged in as @${name}.`, [
+              { text: 'Stay logged in', style: 'cancel' },
+              { text: 'Log out', style: 'destructive', onPress: logOut },
+            ])
           }
         />
       )}
