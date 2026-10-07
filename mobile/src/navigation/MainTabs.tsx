@@ -7,6 +7,7 @@ import { GlobalRankingsScreen } from '../screens/DiscoverScreens';
 import { HomeScreen } from '../screens/DiscoverScreens';
 import { ProfileScreen } from '../screens/SocialScreens';
 import { SearchScreen } from '../screens/DiscoverScreens';
+import { useAuth } from '../state/AuthProvider';
 import { colors } from '../theme/theme';
 import type { MainTabParamList } from './types';
 
@@ -55,7 +56,8 @@ function FriendsTabIcon({ color, size, focused }: TabIconProps) {
 }
 
 function ProfileTabIcon() {
-  return <Avatar seed="me" name="armaanq" size={26} />;
+  const { user } = useAuth();
+  return <Avatar seed="me" name={user?.username ?? ''} size={26} />;
 }
 
 export function MainTabs() {

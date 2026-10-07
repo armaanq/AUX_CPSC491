@@ -9,6 +9,8 @@ export type MainTabParamList = {
 };
 
 export type RootStackParamList = {
+  Login: undefined;
+  Signup: undefined;
   MainTabs: NavigatorScreenParams<MainTabParamList>;
   Compare: { musicId: string };
   MusicDetail: { musicId: string };
