@@ -9,6 +9,7 @@ import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './src/state/AuthProvider';
 import { PrototypeProvider } from './src/state/PrototypeProvider';
+import { RankingsProvider } from './src/state/RankingsProvider';
 import { RootNavigator } from './src/navigation/RootNavigator';
 
 function App() {
@@ -16,9 +17,11 @@ function App() {
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
       <AuthProvider>
-        <PrototypeProvider>
-          <RootNavigator />
-        </PrototypeProvider>
+        <RankingsProvider>
+          <PrototypeProvider>
+            <RootNavigator />
+          </PrototypeProvider>
+        </RankingsProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

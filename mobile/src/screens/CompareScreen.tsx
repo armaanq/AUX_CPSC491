@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import {
@@ -9,23 +9,23 @@ import {
   SENTIMENT_BANDS,
   SENTIMENT_LABELS,
   SENTIMENT_ORDER,
+  type Ranking,
   type Sentiment,
 } from '../data/prototype';
-import { resolveSong } from '../api/songs';
 import { usePrototype } from '../state/PrototypeProvider';
+import { useRankings } from '../state/RankingsProvider';
 import { Button, Cover, Empty, Page, palette, ui } from '../components/Kit';
 type Range = { lo: number; hi: number; excluded: string[] };
 export function CompareScreen({
   route,
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'Compare'>) {
-  const { state, rank } = usePrototype();
+  const { unsave } = usePrototype();
+  const { rankings, rank, loading } = useRankings();
   const item = findMusic(route.params.musicId);
-  // Snapshot of the user's other songs, taken once so the list doesn't shift
-  // under them mid-comparison. Already ordered best-first.
-  const [others] = useState(() =>
-    state.rankings.filter(r => r.musicId !== item?.id),
-  );
+  // Snapshot of the user's other songs, taken when comparing starts so the list
+  // doesn't shift under them mid-comparison. Already ordered best-first.
+  const [others, setOthers] = useState<Ranking[]>([]);
   const [sentiment, setSentiment] = useState<Sentiment | null>(null);
   const [range, setRange] = useState<Range>({ lo: 0, hi: 0, excluded: [] });
   const [history, setHistory] = useState<Range[]>([]);
@@ -39,6 +39,31 @@ export function CompareScreen({
           body="Open a song from this album to rank it instead."
         />
         <Button title="Go back" onPress={() => navigation.goBack()} />
+      </Page>
+    );
+  if (!item.source)
+    return (
+      <Page>
+        <Empty
+          title="This is a sample song"
+          body="Samples aren’t saved to your account. Search for it in Discover to rank the real track."
+        />
+        <Button
+          title="Search in Discover"
+          onPress={() => {
+            navigation.goBack();
+            navigation.navigate('MainTabs', { screen: 'Search' });
+          }}
+        />
+        <Button secondary title="Go back" onPress={() => navigation.goBack()} />
+      </Page>
+    );
+  // Comparing against a half-loaded list would put the song in the wrong spot.
+  if (loading)
+    return (
+      <Page>
+        <ActivityIndicator color={palette.ink} />
+        <Text style={ui.body}>Loading your rankings…</Text>
       </Page>
     );
   const list = sentiment ? bandOf(others, sentiment) : [];
@@ -69,13 +94,15 @@ export function CompareScreen({
   const done = !!sentiment && range.lo >= range.hi;
   const stalled = !!sentiment && !done && !pivot;
   const preview = sentiment
-    ? insertRanking(state.rankings, item.id, sentiment, range.lo).find(
+    ? insertRanking(rankings, item.id, sentiment, range.lo).find(
         r => r.musicId === item.id,
       )
     : undefined;
   function react(choice: Sentiment) {
+    const snapshot = rankings.filter(r => r.musicId !== item!.id);
+    setOthers(snapshot);
     setSentiment(choice);
-    setRange({ lo: 0, hi: bandOf(others, choice).length, excluded: [] });
+    setRange({ lo: 0, hi: bandOf(snapshot, choice).length, excluded: [] });
     setHistory([]);
   }
   function choose(newWins: boolean) {
@@ -108,9 +135,7 @@ export function CompareScreen({
             <Text style={ui.heading}>{item.title}</Text>
             <Text style={ui.body}>{item.artist}</Text>
             <Text style={[ui.title, { fontSize: 64, color: palette.green }]}>
-              {state.rankings
-                .find(r => r.musicId === item.id)
-                ?.score.toFixed(2)}
+              {rankings.find(r => r.musicId === item.id)?.score.toFixed(2)}
             </Text>
             <Text style={ui.body}>#{overallRank} in your songs</Text>
           </View>
@@ -171,13 +196,8 @@ export function CompareScreen({
               if (committed.current) return;
               committed.current = true;
               rank(item.id, sentiment, range.lo);
+              unsave(item.id);
               setSaved(true);
-              // Rankings still live on this phone until the rankings API
-              // exists. This creates the canonical song on the server now,
-              // so that step is already exercised. Failures are harmless here.
-              if (item.source && item.externalId) {
-                resolveSong(item.source, item.externalId).catch(() => {});
-              }
             }}
           />
         </>

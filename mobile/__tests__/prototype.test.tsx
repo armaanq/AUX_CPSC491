@@ -34,8 +34,8 @@ test('requests require acceptance and all changes restore after remount', async 
   });
   expect(current.state.saved).toContain('t5');
   await act(async () => {
-    current.rank('t5', 'FINE', 0);
-    current.rank('a0', 'LOVED', 0); // albums are ignored
+    current.unsave('t5'); // what ranking a song does to the listening queue
+    current.unsave('t9'); // not saved: no change
     current.toggleFavorite('a0');
     current.setBio('My updated bio');
   });
@@ -43,12 +43,7 @@ test('requests require acceptance and all changes restore after remount', async 
   expect(current.state.connections['u-maya']).toBe('friends');
   expect(current.state.saved).not.toContain('t5');
   expect(current.state.saved).toContain('a0');
-  expect(current.state.rankings.some(r => r.musicId === 'a0')).toBe(false);
-  expect(current.state.rankings.find(r => r.musicId === 't5')).toEqual({
-    musicId: 't5',
-    sentiment: 'FINE',
-    score: 6.66,
-  });
+  expect(current.state.bio).toBe('My updated bio');
   await act(async () => {
     current.connect('u-jordan', 'accept');
   });
@@ -64,25 +59,27 @@ test('requests require acceptance and all changes restore after remount', async 
   await act(async () => restored.unmount());
 });
 test('corrupt persisted state falls back without breaking the app', async () => {
-  await AsyncStorage.setItem('@aux/prototype/v3', '{broken');
+  await AsyncStorage.setItem('@aux/prototype/v4', '{broken');
   const renderer = await mount();
   expect(current.error).toContain('Could not restore');
-  expect(current.state.rankings.length).toBeGreaterThan(0);
-  expect(validState({ version: 1, rankings: [] })).toBe(false);
+  expect(current.state.saved).toEqual(['a0', 'a3']);
   await act(async () => renderer.unmount());
 });
-test('an album or a ranking without a reaction is rejected as invalid state', async () => {
+test('older versions and unknown ids are rejected as invalid state', async () => {
   const renderer = await mount();
   const good = current.state;
   expect(validState(good)).toBe(true);
-  expect(
-    validState({
-      ...good,
-      rankings: [{ musicId: 'a0', sentiment: 'LOVED', score: 9 }],
-    }),
-  ).toBe(false);
-  expect(validState({ ...good, rankings: [{ musicId: 't1', score: 9 }] })).toBe(
+  // v3 still carried on-device rankings; those now live on the server.
+  expect(validState({ ...good, version: 3 })).toBe(false);
+  expect(validState({ ...good, saved: ['not-a-real-id'] })).toBe(false);
+  expect(validState({ ...good, connections: { 'u-nobody': 'friends' } })).toBe(
     false,
   );
+  await act(async () => renderer.unmount());
+});
+test('leftover data from older app versions is cleared', async () => {
+  await AsyncStorage.setItem('@aux/prototype/v3', '{"version":3}');
+  const renderer = await mount();
+  expect(await AsyncStorage.getItem('@aux/prototype/v3')).toBeNull();
   await act(async () => renderer.unmount());
 });

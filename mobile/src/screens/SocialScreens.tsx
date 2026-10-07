@@ -9,6 +9,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { findMusic, people, tasteMatch } from '../data/prototype';
 import { usePrototype } from '../state/PrototypeProvider';
 import { useAuth } from '../state/AuthProvider';
+import { useRankings } from '../state/RankingsProvider';
 import { Avatar } from '../components/Avatar';
 import {
   Button,
@@ -25,6 +26,7 @@ const useNav = () =>
 export function FriendsScreen() {
   const nav = useNav();
   const { state, connect } = usePrototype();
+  const { rankings: myRankings } = useRankings();
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState('Friends');
   const requests = Object.values(state.connections).filter(
@@ -64,7 +66,7 @@ export function FriendsScreen() {
       />
       {shown.map(p => {
         const status = state.connections[p.id];
-        const match = tasteMatch(state.rankings, p.rankings);
+        const match = tasteMatch(myRankings, p.rankings);
         return (
           <View key={p.id} style={ui.card}>
             <Pressable
@@ -138,6 +140,7 @@ export function FriendProfileScreen({
 function ProfileContent({ friendId }: { friendId?: string }) {
   const nav = useNav();
   const { state, connect, setBio } = usePrototype();
+  const { rankings: myRankings } = useRankings();
   const { user, logOut } = useAuth();
   const [tab, setTab] = useState('Songs');
   const [editing, setEditing] = useState(false);
@@ -153,13 +156,13 @@ function ProfileContent({ friendId }: { friendId?: string }) {
         />
       </Page>
     );
-  const rankings = own ? state.rankings : person!.rankings;
+  const rankings = own ? myRankings : person!.rankings;
   const name = own ? user?.username ?? '' : person!.name;
   const status = friendId ? state.connections[friendId] : null;
   const favorites = own
     ? state.favorites
     : rankings.slice(0, 3).map(r => r.musicId);
-  const match = tasteMatch(state.rankings, rankings);
+  const match = tasteMatch(myRankings, rankings);
   const genres = Array.from(
     new Set(rankings.map(r => findMusic(r.musicId).genre)),
   );
@@ -285,7 +288,7 @@ function ProfileContent({ friendId }: { friendId?: string }) {
             <Text style={ui.body}>
               {genres
                 .filter(g =>
-                  state.rankings.some(r => findMusic(r.musicId).genre === g),
+                  myRankings.some(r => findMusic(r.musicId).genre === g),
                 )
                 .join(' · ') || 'More to discover together'}
             </Text>
@@ -296,7 +299,7 @@ function ProfileContent({ friendId }: { friendId?: string }) {
               <Text style={ui.body}>Your score / their score</Text>
               {rankings
                 .filter(r =>
-                  state.rankings.some(mine => mine.musicId === r.musicId),
+                  myRankings.some(mine => mine.musicId === r.musicId),
                 )
                 .slice(0, 5)
                 .map(r => (
@@ -305,12 +308,12 @@ function ProfileContent({ friendId }: { friendId?: string }) {
                       {findMusic(r.musicId).title}
                     </Text>
                     <Text style={ui.body}>
-                      {state.rankings
+                      {myRankings
                         .find(mine => mine.musicId === r.musicId)!
                         .score.toFixed(2)}{' '}
                       / {r.score.toFixed(2)} ·{' '}
                       {Math.abs(
-                        state.rankings.find(mine => mine.musicId === r.musicId)!
+                        myRankings.find(mine => mine.musicId === r.musicId)!
                           .score - r.score,
                       ) < 1
                         ? 'On the same wavelength'

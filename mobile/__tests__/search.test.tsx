@@ -139,7 +139,8 @@ describe('SearchScreen', () => {
 });
 
 describe('catalog songs in your library', () => {
-  it('a ranked catalog song survives an app restart', async () => {
+  // Rankings come from the server now; saved and pinned songs still live on the device.
+  it('a saved catalog song survives an app restart', async () => {
     const item = musicFromSearch({
       ...ivy,
       source: 'musicbrainz',
@@ -147,7 +148,7 @@ describe('catalog songs in your library', () => {
     });
     registerMusic([item]);
     const r = await mount();
-    await act(async () => current.rank(item.id, 'LOVED', 0));
+    await act(async () => current.toggleSaved(item.id));
     expect(current.state.library.map(m => m.id)).toEqual([item.id]);
     await act(async () => r.unmount());
 
@@ -158,7 +159,7 @@ describe('catalog songs in your library', () => {
     );
     const again = await mount();
     expect(current.error).toBeNull();
-    expect(current.state.rankings[0].musicId).toBe(item.id);
+    expect(current.state.saved).toContain(item.id);
     expect(findMusic(item.id).title).toBe('Ivy');
     await act(async () => again.unmount());
   });
