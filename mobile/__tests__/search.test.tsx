@@ -3,6 +3,7 @@ import { Text, TextInput } from 'react-native';
 import TestRenderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { API_BASE_URL, USING_LOCAL_SERVER } from '../src/api/config';
 import { searchSongs, resolveSong, type SearchResult } from '../src/api/songs';
 import {
   findMusic,
@@ -80,14 +81,22 @@ describe('api client', () => {
     fetchMock.mockReturnValueOnce(ok({ results: [ivy], usedFallback: true }));
     const r = await searchSongs('ivy & nights');
     expect(fetchMock.mock.calls[0][0]).toBe(
-      'http://localhost:3000/songs/search?q=ivy%20%26%20nights',
+      `${API_BASE_URL}/songs/search?q=ivy%20%26%20nights`,
     );
     expect(r.results[0].title).toBe('Ivy');
   });
 
-  it('explains when the server is not running', async () => {
+  it('uses the shared server, so nobody needs to run server/ to use the app', () => {
+    // Fails if USE_LOCAL_SERVER in src/api/config.ts was committed as true.
+    expect(USING_LOCAL_SERVER).toBe(false);
+    expect(API_BASE_URL).toMatch(/^https:\/\//);
+  });
+
+  it('explains when the server is unreachable', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
-    await expect(searchSongs('ivy')).rejects.toThrow(/npm run start:dev/);
+    await expect(searchSongs('ivy')).rejects.toThrow(
+      /Can't reach the AUX server. Check your internet connection/,
+    );
   });
 
   it('passes the server error message through', async () => {
