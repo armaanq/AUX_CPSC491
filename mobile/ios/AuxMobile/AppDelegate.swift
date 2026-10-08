@@ -34,6 +34,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
+  // Paper (#F8F6F1, palette.paper) instead of white, so there's no white flash
+  // between the launch screen and the app's splash animation.
+  override func customize(_ rootView: RCTRootView) {
+    super.customize(rootView)
+    rootView.backgroundColor = UIColor(red: 248 / 255, green: 246 / 255, blue: 241 / 255, alpha: 1)
+  }
+
   override func sourceURL(for bridge: RCTBridge) -> URL? {
     self.bundleURL()
   }
