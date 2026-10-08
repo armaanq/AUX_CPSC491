@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -15,6 +15,7 @@ import { useAuth } from '../state/AuthProvider';
 import { Button, Page, palette, ui } from '../components/Kit';
 
 const PASSWORD_MIN = 8;
+const WAKE_UP_HINT_DELAY_MS = 5000;
 
 function Field({
   label,
@@ -47,6 +48,21 @@ function ErrorText({ message }: { message: string | null }) {
   return message ? (
     <Text accessibilityRole="alert" style={styles.error}>
       {message}
+    </Text>
+  ) : null;
+}
+
+/** The shared server sleeps when nobody's using it; say so if waking it takes a while. */
+function WakeUpHint() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), WAKE_UP_HINT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return slow ? (
+    <Text style={styles.wakeUp}>
+      Waking up the AUX server. After a quiet spell this can take up to a
+      minute.
     </Text>
   ) : null;
 }
@@ -116,6 +132,7 @@ export function LoginScreen({
       />
       <ErrorText message={error} />
       <Button title={busy ? 'Logging in…' : 'Log in'} onPress={submit} />
+      {busy && <WakeUpHint />}
       <Pressable
         accessibilityRole="button"
         onPress={() => navigation.navigate('Signup')}
@@ -201,6 +218,7 @@ export function SignupScreen({
         title={busy ? 'Creating your account…' : 'Create account'}
         onPress={submit}
       />
+      {busy && <WakeUpHint />}
       <Pressable
         accessibilityRole="button"
         onPress={() => navigation.navigate('Login')}
@@ -220,6 +238,7 @@ export function SessionLoading() {
     <View style={styles.center}>
       <Text style={styles.brand}>AUX</Text>
       <ActivityIndicator color={palette.ink} />
+      <WakeUpHint />
     </View>
   );
 }
@@ -252,6 +271,13 @@ const styles = StyleSheet.create({
   field: { gap: 6 },
   fieldLabel: { fontSize: 13, fontWeight: '700', color: palette.ink },
   hint: { fontSize: 12, color: palette.muted },
+  wakeUp: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: palette.muted,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+  },
   error: { fontSize: 14, lineHeight: 20, fontWeight: '600', color: palette.accent },
   switch: { minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   center: {

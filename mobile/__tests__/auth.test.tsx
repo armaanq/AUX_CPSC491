@@ -4,6 +4,7 @@ import TestRenderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import App from '../App';
+import { API_BASE_URL } from '../src/api/config';
 import { searchSongs } from '../src/api/songs';
 
 // The real provider waits for device screen measurements, which Jest doesn't have.
@@ -91,7 +92,7 @@ describe('logging in', () => {
     await type(r, 'Password', 'longenough');
     await press(r, 'Log in');
 
-    expect(call(0).url).toBe('http://localhost:3000/auth/login');
+    expect(call(0).url).toBe(`${API_BASE_URL}/auth/login`);
     expect(call(0).body).toEqual({ identifier: 'Armaan', password: 'longenough' });
     expect(await savedToken()).toBe('tok-1');
     expect(texts(r)).not.toContain('Log in to your');
@@ -140,7 +141,7 @@ describe('signing up', () => {
     fetchMock.mockReturnValueOnce(reply(201, { token: 'tok-new', user }));
     await type(r, 'Password', 'longenough');
     await press(r, 'Create account');
-    expect(call(0).url).toBe('http://localhost:3000/auth/signup');
+    expect(call(0).url).toBe(`${API_BASE_URL}/auth/signup`);
     expect(call(0).body).toEqual({
       email: 'armaan@example.com',
       username: 'armaan',
@@ -168,7 +169,7 @@ describe('reopening the app', () => {
     await Keychain.setGenericPassword('armaan', 'tok-saved', { service: SERVICE });
     fetchMock.mockReturnValueOnce(reply(200, user));
     const r = await launch();
-    expect(call(0).url).toBe('http://localhost:3000/me');
+    expect(call(0).url).toBe(`${API_BASE_URL}/me`);
     expect(call(0).auth).toBe('Bearer tok-saved');
     expect(texts(r)).toContain('Charts');
   });
@@ -186,12 +187,34 @@ describe('reopening the app', () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
     const r = await launch();
     expect(texts(r)).toContain('answering.');
-    expect(texts(r)).toContain('npm run start:dev');
+    expect(texts(r)).toContain('Check your internet connection');
     expect(await savedToken()).toBe('tok-saved');
 
     fetchMock.mockReturnValueOnce(reply(200, user));
     await press(r, 'Try again');
     expect(texts(r)).toContain('Charts');
+  });
+
+  it('explains the wait while the shared server wakes up', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    try {
+      await Keychain.setGenericPassword('armaan', 'tok-saved', { service: SERVICE });
+      let answer!: (res: Response) => void;
+      fetchMock.mockReturnValueOnce(new Promise<Response>(res => (answer = res)));
+      const r = await launch();
+      expect(texts(r)).not.toContain('Waking up');
+
+      await act(async () => {
+        jest.advanceTimersByTime(5000);
+      });
+      expect(texts(r)).toContain('Waking up the AUX server');
+
+      await act(async () => answer(new Response(JSON.stringify(user), { status: 200 })));
+      await act(async () => {});
+      expect(texts(r)).toContain('Charts');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

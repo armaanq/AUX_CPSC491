@@ -71,7 +71,7 @@ export function fakeServer(
   });
 
   const fetch = (url: string, init: RequestInit = {}) => {
-    const path = url.replace(/^http:\/\/[^/]+/, '');
+    const path = url.replace(/^https?:\/\/[^/]+/, '');
     const method = init.method ?? 'GET';
     const body = init.body ? JSON.parse(String(init.body)) : undefined;
     const auth = (init.headers as Record<string, string> | undefined)

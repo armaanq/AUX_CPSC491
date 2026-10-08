@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './config';
+import { API_BASE_URL, USING_LOCAL_SERVER } from './config';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -32,7 +32,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch (err) {
     if (init?.signal?.aborted) throw err;
     throw new ApiError(
-      `Can't reach the AUX server at ${API_BASE_URL}. Is \`npm run start:dev\` running in server/?`,
+      USING_LOCAL_SERVER
+        ? `Can't reach your local AUX server at ${API_BASE_URL}. Is \`npm run start:dev\` running in server/?`
+        : "Can't reach the AUX server. Check your internet connection and try again.",
     );
   }
   if (!res.ok) {
