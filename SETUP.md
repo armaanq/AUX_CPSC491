@@ -109,6 +109,8 @@ npm run start:dev
 
 Check `http://localhost:3000/health` returns `{"status":"ok"}`.
 
+Search uses MusicBrainz on your server unless you add the Apple Music key (see the `APPLE_MUSIC_*` lines in `.env.example`). Ask Armaan or Arian for it; it's only needed if you're working on search.
+
 ### Point the app at your server
 
 In `mobile/src/api/config.ts`, set `USE_LOCAL_SERVER` to `true` and reload the app. Set it back to `false` before committing — a test fails if it's left on.
@@ -117,7 +119,7 @@ In `mobile/src/api/config.ts`, set `USE_LOCAL_SERVER` to `true` and reload the a
 
 - Merging to `main` redeploys the shared server automatically, and any new migrations run against the shared AWS database on startup. Review migration PRs carefully.
 - Only run `prisma migrate dev` against your **local** database. Against the shared one it can offer to reset the database, which deletes everyone's data.
-- Never commit `server/.env`. Ask Armaan if you need access to the shared database or the Render dashboard.
+- Never commit `server/.env` or the Apple Music `.p8` key. Ask Armaan if you need access to the shared database or the Render dashboard.
 
 ## 5. Git workflow
 

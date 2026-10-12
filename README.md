@@ -19,7 +19,7 @@ AUX/
 - **Mobile:** React Native, TypeScript
 - **Backend:** NestJS, TypeScript
 - **Database:** PostgreSQL via Prisma
-- **Music data:** MusicBrainz (catalog), Cover Art Archive (artwork), Deezer (previews)
+- **Music data:** Apple Music API (search, albums, artwork), with MusicBrainz + Cover Art Archive as the fallback catalog
 - **iOS tooling:** Xcode, iOS Simulator, CocoaPods
 
 ## Getting started

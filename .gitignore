@@ -8,3 +8,6 @@
 # Env
 .env
 .env.local
+
+# Private keys (the Apple Music .p8 lives outside the repo, e.g. ~/.aux/)
+*.p8

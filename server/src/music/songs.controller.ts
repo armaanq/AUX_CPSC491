@@ -11,7 +11,7 @@ export class SongsController {
     return this.songs.search(typeof q === 'string' ? q : undefined);
   }
 
-  /** POST /songs/resolve { source: "musicbrainz", externalId: "<recording mbid>" } */
+  /** POST /songs/resolve { source: "apple", externalId: "1146195713" } (or "musicbrainz" + a recording mbid) */
   @Post('resolve')
   @HttpCode(200)
   resolve(@Body() body: { source?: unknown; externalId?: unknown } | undefined): Promise<{ id: string }> {

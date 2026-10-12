@@ -1,7 +1,7 @@
 import { catalog as tracks, myRankings } from './mockMusic';
 import artwork from './artwork.json';
 import { friends } from './mockFriends';
-import type { CatalogSource, SearchResult } from '../api/songs';
+import type { AlbumResult, CatalogSource, SearchResult } from '../api/songs';
 export type MusicKind = 'song' | 'album';
 export type Music = {
   id: string;
@@ -11,7 +11,7 @@ export type Music = {
   kind: MusicKind;
   albumTitle: string;
   artwork?: string;
-  // Set for real songs from the catalog (MusicBrainz/Spotify), not demo data.
+  // Set for real songs and albums from a catalog (Apple Music, MusicBrainz), not demo data.
   source?: CatalogSource;
   externalId?: string;
   externalUrl?: string;
@@ -113,21 +113,46 @@ music
       });
   });
 export const findMusic = (id: string) => music.find(m => m.id === id)!;
-/** App id for a catalog song, e.g. "mb:<mbid>" or "sp:<spotify id>". */
-export const catalogId = (source: CatalogSource, externalId: string) =>
-  `${source === 'spotify' ? 'sp' : 'mb'}:${externalId}`;
+const ID_PREFIX: Record<CatalogSource, string> = {
+  apple: 'ap',
+  musicbrainz: 'mb',
+  spotify: 'sp',
+};
+/**
+ * App id for catalog music: "ap:<apple song id>", "mb:<mbid>", and
+ * "ap-album:<apple album id>" for albums (song and album ids can overlap).
+ */
+export const catalogId = (
+  source: CatalogSource,
+  externalId: string,
+  kind: MusicKind = 'song',
+) => `${ID_PREFIX[source]}${kind === 'album' ? '-album' : ''}:${externalId}`;
 export function musicFromSearch(r: SearchResult): Music {
   return {
     id: catalogId(r.source, r.externalId),
     title: r.title,
     artist: r.artist,
-    genre: 'Other', // catalogs don't send a genre with search results
+    genre: r.genre ?? 'Other',
     kind: 'song',
     albumTitle: r.album ?? '',
     artwork: r.artworkUrl ?? undefined,
     source: r.source,
     externalId: r.externalId,
     externalUrl: r.externalUrl,
+  };
+}
+export function musicFromAlbum(a: AlbumResult): Music {
+  return {
+    id: catalogId(a.source, a.externalId, 'album'),
+    title: a.title,
+    artist: a.artist,
+    genre: a.genre ?? 'Other',
+    kind: 'album',
+    albumTitle: a.title,
+    artwork: a.artworkUrl ?? undefined,
+    source: a.source,
+    externalId: a.externalId,
+    externalUrl: a.externalUrl,
   };
 }
 /** Makes catalog songs findable by id (detail page, rankings, charts). */
@@ -141,11 +166,12 @@ export function isCatalogMusic(value: unknown): value is Music {
   return (
     !!m &&
     typeof m.id === 'string' &&
-    /^(mb|sp):/.test(m.id) &&
+    /^(ap|mb|sp)(-album)?:/.test(m.id) &&
     typeof m.title === 'string' &&
     typeof m.artist === 'string' &&
-    m.kind === 'song' &&
-    (m.source === 'musicbrainz' || m.source === 'spotify') &&
+    (m.kind === 'song' || m.kind === 'album') &&
+    !!m.source &&
+    m.source in ID_PREFIX &&
     typeof m.externalId === 'string'
   );
 }

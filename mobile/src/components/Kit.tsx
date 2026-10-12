@@ -48,6 +48,8 @@ export const ui = StyleSheet.create({
     color: palette.ink,
   },
   body: { fontSize: 15, lineHeight: 22, color: palette.muted },
+  /** Small print: credits and notes. */
+  fine: { fontSize: 12, lineHeight: 18, color: palette.muted },
   label: {
     fontSize: 11,
     fontWeight: '800',

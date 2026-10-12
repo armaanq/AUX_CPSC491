@@ -32,6 +32,7 @@ describe('mapRecording', () => {
       releaseYear: 2016,
       durationMs: 249191,
       isrc: 'USUM71607007',
+      genre: null,
       artworkUrl: coverArtUrl(IVY_ALBUM_RG),
       externalUrl: `https://musicbrainz.org/recording/${ivyOnBlonde.id}`,
       songId: null,
