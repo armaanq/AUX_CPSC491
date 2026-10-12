@@ -94,6 +94,24 @@ describe('AppleMusicClient', () => {
     expect(second).toBe(first);
   });
 
+  it('fetches the overall chart, or one genre’s, as songs and albums', async () => {
+    fetchMock.mockImplementation(() =>
+      reply(200, {
+        results: {
+          songs: [{ name: 'Top Songs', data: [amIvy] }],
+          albums: [{ name: 'Top Albums', data: [amBlonde] }],
+        },
+      }),
+    );
+    const client = new AppleMusicClient();
+    await expect(client.charts()).resolves.toEqual({ songs: [amIvy], albums: [amBlonde] });
+    await client.charts('18');
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://api.music.apple.com/v1/catalog/us/charts?types=songs%2Calbums&limit=25',
+      'https://api.music.apple.com/v1/catalog/us/charts?types=songs%2Calbums&limit=25&genre=18',
+    ]);
+  });
+
   it('fetches one song or album by id', async () => {
     fetchMock.mockReturnValueOnce(reply(200, { data: [amBlonde] }));
     const client = new AppleMusicClient();

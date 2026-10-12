@@ -50,6 +50,14 @@ export interface AmSearchResponse {
   };
 }
 
+/** GET /charts: one chart per type (e.g. "Top Songs", most played). */
+export interface AmChartsResponse {
+  results?: {
+    songs?: { name?: string; data: AmSong[] }[];
+    albums?: { name?: string; data: AmAlbum[] }[];
+  };
+}
+
 export interface AmDataResponse<T> {
   data?: T[];
 }

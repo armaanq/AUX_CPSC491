@@ -6,6 +6,7 @@ import type {
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
+import { CHART_GENRES, getCommunityChart } from '../api/charts';
 import { getAlbum, searchSongs, SOURCE_NAMES } from '../api/songs';
 import {
   findMusic,
@@ -18,6 +19,7 @@ import {
 } from '../data/prototype';
 import { usePrototype } from '../state/PrototypeProvider';
 import { useRankings } from '../state/RankingsProvider';
+import { useCharts, type Charts } from '../state/useCharts';
 import {
   Button,
   Chips,
@@ -31,11 +33,23 @@ import {
 } from '../components/Kit';
 const useNav = () =>
   useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+/** "Loading…" or why the charts couldn't load; nothing once they're in. */
+function ChartStatus({ charts }: { charts: Charts }) {
+  if (charts.status === 'done') return null;
+  return (
+    <Text style={ui.body}>
+      {charts.status === 'loading' ? 'Loading the charts…' : charts.error}
+    </Text>
+  );
+}
 export function HomeScreen() {
   const nav = useNav();
   const { state } = usePrototype();
   const { rankings, recent } = useRankings();
+  const charts = useCharts();
   const open = (musicId: string) => nav.navigate('MusicDetail', { musicId });
+  const scoreOf = (musicId: string) =>
+    rankings.find(r => r.musicId === musicId)?.score;
   const activity = people.filter(p => state.connections[p.id] === 'friends');
   return (
     <Page>
@@ -72,17 +86,36 @@ export function HomeScreen() {
         />
       </View>
       <View style={ui.between}>
-        <Text style={ui.heading}>Your next listen</Text>
-        <Text style={ui.label}>CURATED PICKS</Text>
+        <Text style={ui.heading}>Top albums</Text>
+        <Text style={ui.label}>ON APPLE MUSIC</Text>
       </View>
-      <Shelf
-        items={music
-          .filter(
-            m => m.kind === 'album' && !rankings.some(r => r.musicId === m.id),
-          )
-          .slice(0, 6)}
-        onPress={open}
-      />
+      <ChartStatus charts={charts} />
+      {!!charts.albums.length && (
+        <Shelf items={charts.albums.slice(0, 10)} onPress={open} />
+      )}
+      {!!charts.songs.length && (
+        <>
+          <View style={ui.between}>
+            <Text style={ui.heading}>Top songs</Text>
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={12}
+              onPress={() => nav.navigate('MainTabs', { screen: 'Search' })}
+            >
+              <Text style={ui.link}>More charts ↗</Text>
+            </Pressable>
+          </View>
+          {charts.songs.slice(0, 10).map((m, i) => (
+            <MusicRow
+              key={m.id}
+              item={m}
+              rank={i + 1}
+              score={scoreOf(m.id)}
+              onPress={() => open(m.id)}
+            />
+          ))}
+        </>
+      )}
       <View style={ui.between}>
         <Text style={ui.heading}>In your circle</Text>
         <Pressable
@@ -98,7 +131,7 @@ export function HomeScreen() {
           <Text style={ui.label}>YOU RANKED</Text>
           <MusicRow
             item={findMusic(id)}
-            score={rankings.find(r => r.musicId === id)?.score}
+            score={scoreOf(id)}
             onPress={() => open(id)}
           />
         </View>
@@ -127,12 +160,14 @@ export function HomeScreen() {
           body="Add friends to discover the music at the top of their lists."
         />
       )}
-      <Text style={[ui.body, { fontSize: 12 }]}>
-        Demo edition · Curated catalog and sample friend activity.
+      <Text style={ui.fine}>
+        Charts from Apple Music · Friend activity is sample data.
       </Text>
     </Page>
   );
 }
+type Genre = (typeof CHART_GENRES)[number]['label'];
+const GENRES = CHART_GENRES.map(g => g.label);
 type RemoteSearch = {
   status: 'idle' | 'loading' | 'done' | 'error';
   songs: Music[];
@@ -146,10 +181,12 @@ export function SearchScreen() {
   const nav = useNav();
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('All');
-  const [genre, setGenre] = useState('All genres');
+  const [genre, setGenre] = useState<Genre>('All genres');
   const [remote, setRemote] = useState<RemoteSearch>(IDLE);
   const q = query.trim();
   const searchCatalog = q.length >= 2;
+  // Before a search, Discover shows the chart for the chosen genre.
+  const charts = useCharts(CHART_GENRES.find(g => g.label === genre)?.id);
   useEffect(() => {
     if (!searchCatalog) {
       setRemote(IDLE);
@@ -182,24 +219,15 @@ export function SearchScreen() {
       controller.abort();
     };
   }, [q, searchCatalog]);
-  // Built-in demo music (albums to browse, sample songs).
-  const local = music.filter(
-    m =>
-      !m.source &&
-      (kind === 'All' || m.kind === (kind === 'Songs' ? 'song' : 'album')) &&
-      (genre === 'All genres' || m.genre === genre) &&
-      `${m.title} ${m.artist} ${m.albumTitle}`
-        .toLowerCase()
-        .includes(q.toLowerCase()),
-  );
   const songs = kind === 'Albums' ? [] : remote.songs;
   const albums = kind === 'Songs' ? [] : remote.albums;
   const searching = remote.status === 'loading';
   const nothing =
-    !local.length &&
-    (!searchCatalog || remote.status === 'done') &&
+    searchCatalog &&
+    remote.status === 'done' &&
     !songs.length &&
     !albums.length;
+  const open = (musicId: string) => nav.navigate('MusicDetail', { musicId });
   return (
     <Page>
       <Text style={ui.label}>GO A LITTLE DEEPER</Text>
@@ -219,12 +247,33 @@ export function SearchScreen() {
         value={kind}
         onChange={setKind}
       />
-      {!q && (
-        <Chips
-          values={['All genres', 'R&B', 'Hip-hop', 'Soul', 'Pop']}
-          value={genre}
-          onChange={setGenre}
-        />
+      {!searchCatalog && (
+        <>
+          <Chips values={GENRES} value={genre} onChange={setGenre} />
+          <ChartStatus charts={charts} />
+          {kind !== 'Songs' && !!charts.albums.length && (
+            <>
+              <Text style={ui.heading}>Top albums</Text>
+              <Shelf items={charts.albums} onPress={open} />
+            </>
+          )}
+          {kind !== 'Albums' && !!charts.songs.length && (
+            <>
+              <Text style={ui.heading}>Top songs</Text>
+              {charts.songs.map((m, i) => (
+                <MusicRow
+                  key={m.id}
+                  item={m}
+                  rank={i + 1}
+                  onPress={() => open(m.id)}
+                />
+              ))}
+            </>
+          )}
+          {charts.status === 'done' && (
+            <Text style={ui.fine}>Charts from Apple Music</Text>
+          )}
+        </>
       )}
       {searchCatalog && remote.status === 'error' && (
         <Empty title="Search is unavailable" body={remote.error ?? ''} />
@@ -272,24 +321,6 @@ export function SearchScreen() {
         !!(songs.length || albums.length) && (
           <Text style={ui.fine}>Results from {remote.credit}</Text>
         )}
-      {!!local.length && (
-        <>
-          <View style={ui.between}>
-            <Text style={ui.heading}>
-              {q ? 'In the demo collection' : 'Explore the collection'}
-            </Text>
-            <Text style={ui.body}>{local.length} titles</Text>
-          </View>
-          {local.map(m => (
-            <MusicRow
-              key={m.id}
-              item={m}
-              detail={`${m.artist} · ${m.kind}`}
-              onPress={() => nav.navigate('MusicDetail', { musicId: m.id })}
-            />
-          ))}
-        </>
-      )}
       {nothing && (
         <>
           <Empty
@@ -302,7 +333,6 @@ export function SearchScreen() {
             onPress={() => {
               setQuery('');
               setKind('All');
-              setGenre('All genres');
             }}
           />
         </>
@@ -505,57 +535,74 @@ function AlbumTracks({ album }: { album: Music }) {
     </>
   );
 }
+type CommunityChart = {
+  status: 'loading' | 'done' | 'error';
+  entries: { item: Music; listeners: number; averageScore: number }[];
+  error?: string;
+};
 export function GlobalRankingsScreen() {
   const nav = useNav();
   const { rankings } = useRankings();
-  const [genre, setGenre] = useState('All genres');
-  const entries = music
-    .filter(
-      m => m.kind === 'song' && (genre === 'All genres' || m.genre === genre),
-    )
-    .map(m => {
-      const ratings = [
-        ...people.map(p => p.rankings.find(r => r.musicId === m.id)?.score),
-        rankings.find(r => r.musicId === m.id)?.score,
-      ].filter((v): v is number => v !== undefined);
-      return {
-        item: m,
-        count: ratings.length,
-        score: ratings.reduce((a, b) => a + b, 0) / ratings.length,
-      };
-    })
-    .filter(r => r.count > 0)
-    .sort((a, b) => b.score - a.score);
+  const [chart, setChart] = useState<CommunityChart>({
+    status: 'loading',
+    entries: [],
+  });
+  // Loads again whenever your rankings change, so your latest pick shows up.
+  useEffect(() => {
+    let current = true;
+    getCommunityChart()
+      .then(({ entries }) => {
+        const rows = entries.map(e => ({
+          item: musicFromSearch({ ...e.song, songId: e.song.id }),
+          listeners: e.listeners,
+          averageScore: e.averageScore,
+        }));
+        registerMusic(rows.map(r => r.item));
+        if (current) setChart({ status: 'done', entries: rows });
+      })
+      .catch((err: Error) => {
+        if (current) setChart({ status: 'error', entries: [], error: err.message });
+      });
+    return () => {
+      current = false;
+    };
+  }, [rankings]);
   return (
     <Page>
       <Text style={ui.label}>THE COMMUNITY EDIT</Text>
       <Text style={ui.title}>On repeat.</Text>
       <Text style={ui.body}>
-        The music rising to the top of our demo listeners’ lists.
+        The songs AUX listeners rank highest. Every ranking counts.
       </Text>
-      <Chips
-        values={['All genres', 'R&B', 'Hip-hop', 'Soul', 'Pop']}
-        value={genre}
-        onChange={setGenre}
-      />
-      <Text style={ui.label}>SAMPLE CHART · INCLUDES YOUR RATINGS</Text>
-      {entries.map((r, i) => (
+      {chart.status === 'loading' && (
+        <Text style={ui.body}>Loading the chart…</Text>
+      )}
+      {chart.status === 'error' && (
+        <Empty title="The chart is unavailable" body={chart.error ?? ''} />
+      )}
+      {chart.entries.map((r, i) => (
         <MusicRow
           key={r.item.id}
           item={r.item}
           rank={i + 1}
-          score={r.score}
-          detail={`${r.item.artist} · ${r.count} ${
-            r.count === 1 ? 'listener' : 'listeners'
+          score={r.averageScore}
+          detail={`${r.item.artist} · ${r.listeners} ${
+            r.listeners === 1 ? 'listener' : 'listeners'
           }`}
           onPress={() => nav.navigate('MusicDetail', { musicId: r.item.id })}
         />
       ))}
-      {!entries.length && (
+      {chart.status === 'done' && !chart.entries.length && (
         <Empty
           title="An open spot at the top"
-          body="Rank a song to start this demo chart."
+          body="Rank a song to start the AUX chart."
         />
+      )}
+      {!!chart.entries.length && (
+        <Text style={ui.fine}>
+          Average scores from everyone on AUX. Ties go to the song more people
+          ranked.
+        </Text>
       )}
     </Page>
   );

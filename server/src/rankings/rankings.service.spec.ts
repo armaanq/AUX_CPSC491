@@ -131,6 +131,65 @@ describe('RankingsService.place', () => {
   });
 });
 
+describe('RankingsService.community', () => {
+  function communitySetup(
+    groups: { songId: string; avg: number; count: number }[],
+    songs: { id: string; title: string }[],
+  ) {
+    const prisma = {
+      ranking: {
+        groupBy: vi.fn().mockResolvedValue(
+          groups.map((g) => ({
+            songId: g.songId,
+            _avg: { score: g.avg },
+            _count: { songId: g.count },
+          })),
+        ),
+      },
+      song: {
+        findMany: vi.fn().mockResolvedValue(
+          songs.map((s) => ({ ...s, album: { title: 'Blonde' } })),
+        ),
+      },
+    };
+    return {
+      service: new RankingsService(prisma as unknown as PrismaService),
+      prisma,
+    };
+  }
+
+  it('combines everyone’s rankings: best average first, with listener counts', async () => {
+    const { service, prisma } = communitySetup(
+      [
+        { songId: SONG(2), avg: 9.444, count: 3 },
+        { songId: SONG(1), avg: 8.34, count: 1 },
+      ],
+      // The database returns songs in any order; the chart order must win.
+      [
+        { id: SONG(1), title: 'Ivy' },
+        { id: SONG(2), title: 'Nights' },
+      ],
+    );
+    const { entries } = await service.community();
+    expect(
+      entries.map((e) => [e.song.title, e.averageScore, e.listeners]),
+    ).toEqual([
+      ['Nights', 9.44, 3],
+      ['Ivy', 8.34, 1],
+    ]);
+    expect(entries[0].song.album).toBe('Blonde');
+    expect(prisma.ranking.groupBy.mock.calls[0][0].orderBy).toEqual([
+      { _avg: { score: 'desc' } },
+      { _count: { songId: 'desc' } },
+    ]);
+  });
+
+  it('is empty before anyone has ranked anything', async () => {
+    const { service } = communitySetup([], []);
+    await expect(service.community()).resolves.toEqual({ entries: [] });
+  });
+});
+
 describe('RankingsService.remove', () => {
   it('deletes the song and re-spreads its band', async () => {
     const { service, tx } = setup([
