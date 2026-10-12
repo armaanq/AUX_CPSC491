@@ -13,6 +13,7 @@ datasource db {
 enum CatalogSource {
   musicbrainz
   spotify
+  apple
 }
 
 enum Sentiment {

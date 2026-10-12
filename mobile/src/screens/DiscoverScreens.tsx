@@ -6,10 +6,11 @@ import type {
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import { searchSongs } from '../api/songs';
+import { getAlbum, searchSongs, SOURCE_NAMES } from '../api/songs';
 import {
   findMusic,
   music,
+  musicFromAlbum,
   musicFromSearch,
   people,
   registerMusic,
@@ -134,10 +135,13 @@ export function HomeScreen() {
 }
 type RemoteSearch = {
   status: 'idle' | 'loading' | 'done' | 'error';
-  results: Music[];
+  songs: Music[];
+  albums: Music[];
+  /** Who the results came from, e.g. "Apple Music", for the credit line. */
+  credit?: string;
   error?: string;
 };
-const IDLE: RemoteSearch = { status: 'idle', results: [] };
+const IDLE: RemoteSearch = { status: 'idle', songs: [], albums: [] };
 export function SearchScreen() {
   const nav = useNav();
   const [query, setQuery] = useState('');
@@ -145,26 +149,32 @@ export function SearchScreen() {
   const [genre, setGenre] = useState('All genres');
   const [remote, setRemote] = useState<RemoteSearch>(IDLE);
   const q = query.trim();
-  const searchCatalog = q.length >= 2 && kind !== 'Albums';
+  const searchCatalog = q.length >= 2;
   useEffect(() => {
     if (!searchCatalog) {
       setRemote(IDLE);
       return;
     }
-    // Wait until typing pauses (400ms) so each keystroke isn't a request:
-    // the public MusicBrainz API allows ~1 request per second.
+    // Wait until typing pauses (400ms) so each keystroke isn't a request.
     const controller = new AbortController();
     setRemote(r => ({ ...r, status: 'loading' }));
     const timer = setTimeout(() => {
       searchSongs(q, controller.signal)
-        .then(({ results }) => {
-          const items = results.map(musicFromSearch);
-          registerMusic(items);
-          setRemote({ status: 'done', results: items });
+        .then(({ results, albums }) => {
+          const songs = results.map(musicFromSearch);
+          const albumItems = albums.map(musicFromAlbum);
+          registerMusic([...songs, ...albumItems]);
+          const source = results[0]?.source ?? albums[0]?.source;
+          setRemote({
+            status: 'done',
+            songs,
+            albums: albumItems,
+            credit: source && SOURCE_NAMES[source],
+          });
         })
         .catch((err: Error) => {
           if (controller.signal.aborted) return;
-          setRemote({ status: 'error', results: [], error: err.message });
+          setRemote({ ...IDLE, status: 'error', error: err.message });
         });
     }, 400);
     return () => {
@@ -182,10 +192,14 @@ export function SearchScreen() {
         .toLowerCase()
         .includes(q.toLowerCase()),
   );
+  const songs = kind === 'Albums' ? [] : remote.songs;
+  const albums = kind === 'Songs' ? [] : remote.albums;
+  const searching = remote.status === 'loading';
   const nothing =
     !local.length &&
     (!searchCatalog || remote.status === 'done') &&
-    !remote.results.length;
+    !songs.length &&
+    !albums.length;
   return (
     <Page>
       <Text style={ui.label}>GO A LITTLE DEEPER</Text>
@@ -212,35 +226,52 @@ export function SearchScreen() {
           onChange={setGenre}
         />
       )}
-      {searchCatalog && (
+      {searchCatalog && remote.status === 'error' && (
+        <Empty title="Search is unavailable" body={remote.error ?? ''} />
+      )}
+      {searchCatalog && kind !== 'Albums' && (
         <>
           <View style={ui.between}>
             <Text style={ui.heading}>Songs</Text>
             <Text style={ui.body}>
-              {remote.status === 'loading'
-                ? 'Searching…'
-                : `${remote.results.length} found`}
+              {searching ? 'Searching…' : `${songs.length} found`}
             </Text>
           </View>
-          {remote.status === 'error' && (
-            <Empty title="Search is unavailable" body={remote.error ?? ''} />
-          )}
-          {remote.results.map(m => (
+          {songs.map(m => (
             <MusicRow
               key={m.id}
               item={m}
-              detail={[
-                m.artist,
-                m.albumTitle,
-                m.source === 'spotify' ? 'via Spotify' : '',
-              ]
-                .filter(Boolean)
-                .join(' · ')}
+              detail={[m.artist, m.albumTitle].filter(Boolean).join(' · ')}
               onPress={() => nav.navigate('MusicDetail', { musicId: m.id })}
             />
           ))}
         </>
       )}
+      {/* "All" only shows albums when there are some; fallback catalogs don't search albums. */}
+      {searchCatalog && (kind === 'Albums' || !!albums.length) && (
+        <>
+          <View style={ui.between}>
+            <Text style={ui.heading}>Albums</Text>
+            <Text style={ui.body}>
+              {searching ? 'Searching…' : `${albums.length} found`}
+            </Text>
+          </View>
+          {albums.map(m => (
+            <MusicRow
+              key={m.id}
+              item={m}
+              detail={`${m.artist} · album`}
+              onPress={() => nav.navigate('MusicDetail', { musicId: m.id })}
+            />
+          ))}
+        </>
+      )}
+      {searchCatalog &&
+        remote.status === 'done' &&
+        !!remote.credit &&
+        !!(songs.length || albums.length) && (
+          <Text style={ui.fine}>Results from {remote.credit}</Text>
+        )}
       {!!local.length && (
         <>
           <View style={ui.between}>
@@ -303,9 +334,7 @@ export function MusicDetailScreen({
       <View style={{ alignItems: 'center', gap: 14 }}>
         <Text style={ui.label}>
           {item.source
-            ? `song / ${
-                item.source === 'spotify' ? 'via Spotify' : 'MusicBrainz'
-              }`
+            ? `${item.kind} / ${SOURCE_NAMES[item.source]}`
             : `${item.kind} / ${item.genre}`}
         </Text>
         <Cover item={item} size={230} />
@@ -356,20 +385,21 @@ export function MusicDetailScreen({
           }
           onPress={() => toggleFavorite(item.id)}
         />
-        {item.externalUrl && (
-          // Spotify's terms require linking back when showing its data.
+        {item.externalUrl && item.source && (
+          // Apple Music and Spotify ask apps showing their data to link back to them.
           <Button
             secondary
             title={
-              item.source === 'spotify'
-                ? 'Open in Spotify ↗'
-                : 'View on MusicBrainz ↗'
+              item.source === 'musicbrainz'
+                ? 'View on MusicBrainz ↗'
+                : `Open in ${SOURCE_NAMES[item.source]} ↗`
             }
             onPress={() => Linking.openURL(item.externalUrl!)}
           />
         )}
       </View>
-      {item.kind === 'album' && (
+      {item.kind === 'album' && item.source && <AlbumTracks album={item} />}
+      {item.kind === 'album' && !item.source && (
         <>
           <Text style={ui.heading}>Songs in this demo</Text>
           {music
@@ -422,6 +452,57 @@ export function MusicDetailScreen({
           </Text>
         )}
     </Page>
+  );
+}
+type Tracklist = {
+  status: 'loading' | 'done' | 'error';
+  tracks: Music[];
+  error?: string;
+};
+/** A catalog album's songs, each one rankable. */
+function AlbumTracks({ album }: { album: Music }) {
+  const nav = useNav();
+  const [list, setList] = useState<Tracklist>({
+    status: 'loading',
+    tracks: [],
+  });
+  const { source, externalId } = album;
+  useEffect(() => {
+    if (!source || !externalId) return;
+    let current = true;
+    getAlbum(source, externalId)
+      .then(({ tracks }) => {
+        const items = tracks.map(musicFromSearch);
+        registerMusic(items);
+        if (current) setList({ status: 'done', tracks: items });
+      })
+      .catch((err: Error) => {
+        if (current) setList({ status: 'error', tracks: [], error: err.message });
+      });
+    return () => {
+      current = false;
+    };
+  }, [source, externalId]);
+  return (
+    <>
+      <View style={ui.between}>
+        <Text style={ui.heading}>Tracklist</Text>
+        <Text style={ui.body}>
+          {list.status === 'loading' ? 'Loading…' : `${list.tracks.length} songs`}
+        </Text>
+      </View>
+      {list.status === 'error' && (
+        <Empty title="Couldn’t load the songs" body={list.error ?? ''} />
+      )}
+      {list.tracks.map((m, i) => (
+        <MusicRow
+          key={m.id}
+          item={m}
+          rank={i + 1}
+          onPress={() => nav.push('MusicDetail', { musicId: m.id })}
+        />
+      ))}
+    </>
   );
 }
 export function GlobalRankingsScreen() {

@@ -1,20 +1,7 @@
+import { yearOf, type SearchResult } from '../catalog.js';
 import type { MbArtistCredit, MbRecording, MbRelease } from './musicbrainz.types.js';
 
-/** A song as GET /songs/search returns it. Mirrors mobile/src/api/songs.ts. */
-export interface SearchResult {
-  source: 'musicbrainz' | 'spotify';
-  externalId: string;
-  title: string;
-  artist: string;
-  album: string | null;
-  releaseYear: number | null;
-  durationMs: number | null;
-  isrc: string | null;
-  artworkUrl: string | null;
-  externalUrl: string;
-  /** AUX song id if someone already ranked/saved it. */
-  songId: string | null;
-}
+export { yearOf, type SearchResult };
 
 /** A search result plus the album details needed to save it later. */
 export interface MappedRecording {
@@ -36,11 +23,6 @@ export const coverArtUrl = (releaseGroupId: string) =>
 export function artistName(credits: MbArtistCredit[] | undefined): string {
   if (!credits?.length) return 'Unknown artist';
   return credits.map(c => `${c.name}${c.joinphrase ?? ''}`).join('').trim();
-}
-
-export function yearOf(date: string | undefined | null): number | null {
-  const year = Number(date?.slice(0, 4));
-  return Number.isInteger(year) && year > 0 ? year : null;
 }
 
 const UNWANTED = new Set(['Compilation', 'Live', 'DJ-mix', 'Mixtape/Street', 'Remix', 'Karaoke']);
@@ -87,6 +69,7 @@ export function mapRecording(rec: MbRecording): MappedRecording {
       releaseYear,
       durationMs: typeof rec.length === 'number' ? rec.length : null,
       isrc: rec.isrcs?.[0] ?? null,
+      genre: null, // MusicBrainz searches don't include genres
       artworkUrl: rg ? coverArtUrl(rg.id) : null,
       externalUrl: `https://musicbrainz.org/recording/${rec.id}`,
       songId: null,
