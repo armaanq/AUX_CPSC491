@@ -2,7 +2,7 @@
 
 A head-to-head music comparison and ranking app — think Letterboxd/Beli, but for songs and albums. Users rank music by directly comparing it against other music they've logged, building a personal 0-10 ranked list plus community rankings, social feeds, and taste-compatibility scoring.
 
-Built for CPSC 491 (Capstone) by Armaan Qazen, Shyan Khazeni, and Arian Gholaimpur.
+Built for CPSC 491 (Capstone) by Armaan Qazen, Shyan Khazeni, and Arian Gholamipour.
 
 ## Repo layout
 
