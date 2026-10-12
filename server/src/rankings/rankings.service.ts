@@ -46,6 +46,21 @@ export interface RankingsResponse {
   rankings: RankedSong[];
 }
 
+export interface CommunityEntry {
+  song: RankedSong['song'];
+  /** How many AUX users have ranked it. */
+  listeners: number;
+  /** Their scores averaged, 0-10. */
+  averageScore: number;
+}
+
+export interface CommunityChartResponse {
+  /** Highest average score first; ties go to the song more people ranked. */
+  entries: CommunityEntry[];
+}
+
+const COMMUNITY_CHART_SIZE = 50;
+
 export interface PlaceBody {
   sentiment?: unknown;
   position?: unknown;
@@ -111,6 +126,36 @@ export class RankingsService {
       await apply(tx, userId, current, remove(current, songId));
       return this.load(tx, userId);
     });
+  }
+
+  /** Every AUX user's rankings combined into one chart. No usernames, just totals. */
+  async community(): Promise<CommunityChartResponse> {
+    const groups = await this.prisma.ranking.groupBy({
+      by: ['songId'],
+      _avg: { score: true },
+      _count: { songId: true },
+      orderBy: [{ _avg: { score: 'desc' } }, { _count: { songId: 'desc' } }],
+      take: COMMUNITY_CHART_SIZE,
+    });
+    const songs = await this.prisma.song.findMany({
+      where: { id: { in: groups.map((g) => g.songId) } },
+      select: songSelect,
+    });
+    const byId = new Map(songs.map((s) => [s.id, s]));
+    return {
+      entries: groups.flatMap((g) => {
+        const row = byId.get(g.songId);
+        if (!row) return [];
+        const { album, ...song } = row;
+        return [
+          {
+            song: { ...song, album: album?.title ?? null },
+            listeners: g._count.songId,
+            averageScore: Math.round((g._avg.score ?? 0) * 100) / 100,
+          },
+        ];
+      }),
+    };
   }
 
   private async load(db: Db, userId: string): Promise<RankingsResponse> {

@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createPrivateKey, sign, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { AmAlbum, AmDataResponse, AmSearchResponse, AmSong } from './apple-music.types.js';
+import type {
+  AmAlbum,
+  AmChartsResponse,
+  AmDataResponse,
+  AmSearchResponse,
+  AmSong,
+} from './apple-music.types.js';
 
 /** Apple Music isn't set up on this server, or couldn't answer: outage, timeout, rejected key. */
 export class AppleMusicUnavailableError extends Error {}
@@ -16,6 +22,8 @@ const TOKEN_TTL_S = 12 * 60 * 60;
 const RENEW_BEFORE_S = 60 * 60;
 /** The most results Apple returns per type (songs, albums) in one search. */
 export const APPLE_SEARCH_LIMIT = 25;
+/** How many songs and albums to take from each chart. */
+export const APPLE_CHART_LIMIT = 25;
 
 export interface AppleMusicConfig {
   teamId: string;
@@ -76,6 +84,14 @@ export class AppleMusicClient {
     const params = new URLSearchParams({ term: text, types: 'songs,albums', limit: String(APPLE_SEARCH_LIMIT) });
     const body = await this.get<AmSearchResponse>(`/search?${params}`);
     return { songs: body.results?.songs?.data ?? [], albums: body.results?.albums?.data ?? [] };
+  }
+
+  /** The most-played songs and albums right now, overall or for one genre (Apple genre id, e.g. "18"). */
+  async charts(genre?: string): Promise<{ songs: AmSong[]; albums: AmAlbum[] }> {
+    const params = new URLSearchParams({ types: 'songs,albums', limit: String(APPLE_CHART_LIMIT) });
+    if (genre) params.set('genre', genre);
+    const body = await this.get<AmChartsResponse>(`/charts?${params}`);
+    return { songs: body.results?.songs?.[0]?.data ?? [], albums: body.results?.albums?.[0]?.data ?? [] };
   }
 
   async song(id: string): Promise<AmSong> {

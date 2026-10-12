@@ -38,6 +38,7 @@ function setup({ appleMusic = false } = {}) {
     search: vi.fn().mockResolvedValue({ songs: [amIvy, amNights, amIvyOnCompilation], albums: [amBlonde] }),
     song: vi.fn().mockResolvedValue(amIvy),
     album: vi.fn().mockResolvedValue(amBlondeWithTracks),
+    charts: vi.fn().mockResolvedValue({ songs: [amNights, amIvy], albums: [amBlonde] }),
   };
   const prisma = {
     song: {
@@ -270,6 +271,48 @@ describe('SongsService.search with Apple Music', () => {
     const { results } = await service.search('ivy');
     expect(results[0]).toMatchObject({ title: 'Ivy', songId: 'aux-ivy' });
     expect(results[1].songId).toBeNull();
+  });
+});
+
+describe('SongsService.charts', () => {
+  it('returns Apple Music’s top songs (in chart order) and albums', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    const { songs, albums } = await service.charts(undefined);
+    expect(apple.charts).toHaveBeenCalledWith(undefined);
+    expect(songs.map(s => [s.source, s.title])).toEqual([
+      ['apple', 'Nights'],
+      ['apple', 'Ivy'],
+    ]);
+    expect(albums.map(a => a.title)).toEqual(['Blonde']);
+  });
+
+  it('fetches one genre’s chart and caches each chart separately', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    await service.charts('18');
+    await service.charts('18');
+    await service.charts('');
+    expect(apple.charts.mock.calls).toEqual([['18'], [undefined]]);
+  });
+
+  it('links chart songs that are already in AUX, and ranks them without another Apple call', async () => {
+    const { service, apple, prisma } = setup({ appleMusic: true });
+    prisma.song.findMany.mockResolvedValueOnce([
+      { id: 'aux-ivy', source: 'apple', externalId: amIvy.id, isrc: 'QZ5C81600002' },
+    ]);
+    const { songs } = await service.charts(undefined);
+    expect(songs[1].songId).toBe('aux-ivy');
+    await service.resolve('apple', amNights.id);
+    expect(apple.song).not.toHaveBeenCalled();
+  });
+
+  it('rejects a bad genre and explains when charts are unavailable', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    await expect(service.charts('hip-hop')).rejects.toBeInstanceOf(BadRequestException);
+    apple.charts.mockRejectedValueOnce(new AppleMusicUnavailableError('down'));
+    await expect(service.charts(undefined)).rejects.toBeInstanceOf(ServiceUnavailableException);
+    await expect(setup({ appleMusic: false }).service.charts(undefined)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
   });
 });
 

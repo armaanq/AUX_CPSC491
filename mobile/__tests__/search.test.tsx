@@ -20,6 +20,7 @@ import {
 import { MusicDetailScreen, SearchScreen } from '../src/screens/DiscoverScreens';
 import { AuthProvider } from '../src/state/AuthProvider';
 import { RankingsProvider } from '../src/state/RankingsProvider';
+import { clearChartsCache } from '../src/state/useCharts';
 import {
   PrototypeProvider,
   usePrototype,
@@ -106,10 +107,26 @@ async function choose(r: TestRenderer.ReactTestRenderer, label: string) {
   await act(async () => target.props.onPress());
 }
 
+/**
+ * Answers searches with `search` and everything else (the chart Discover
+ * loads when it opens) with an empty chart, so the two never mix up.
+ */
+function serveSearch(search: () => Promise<Response>) {
+  fetchMock.mockImplementation((url: string) =>
+    url.includes('/songs/search') ? search() : ok({ songs: [], albums: [] }),
+  );
+}
+const searchCalls = () =>
+  fetchMock.mock.calls.filter(([url]) => String(url).includes('/songs/search'));
+
 beforeEach(async () => {
   fetchMock.mockReset();
   mockNavigate.mockReset();
+  clearChartsCache();
   await AsyncStorage.clear();
+});
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 describe('api client', () => {
@@ -160,20 +177,20 @@ describe('api client', () => {
 describe('SearchScreen', () => {
   it('waits for typing to pause, then shows songs and albums with Apple Music credit', async () => {
     jest.useFakeTimers();
-    fetchMock.mockReturnValue(
+    serveSearch(() =>
       ok({ results: [ivy], albums: [blonde], usedFallback: false }),
     );
     const r = await mount(<SearchScreen />);
     const input = r.root.findByType(TextInput);
     await act(async () => input.props.onChangeText('iv'));
     await act(async () => input.props.onChangeText('ivy'));
-    expect(fetchMock).not.toHaveBeenCalled(); // still waiting for a pause
+    expect(searchCalls()).toHaveLength(0); // still waiting for a pause
     await act(async () => {
       jest.advanceTimersByTime(400);
     });
     jest.useRealTimers();
     await act(async () => {});
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(searchCalls()).toHaveLength(1);
     expect(texts(r)).toContain('Frank Ocean · Blonde');
     expect(texts(r)).toContain('Frank Ocean · album');
     expect(texts(r)).toContain('Results from Apple Music');
@@ -183,7 +200,7 @@ describe('SearchScreen', () => {
   });
 
   it('filters to just songs or just albums', async () => {
-    fetchMock.mockReturnValue(
+    serveSearch(() =>
       ok({ results: [ivy], albums: [blonde], usedFallback: false }),
     );
     const r = await mount(<SearchScreen />);
@@ -203,7 +220,7 @@ describe('SearchScreen', () => {
   });
 
   it('shows why search failed', async () => {
-    fetchMock.mockRejectedValue(new TypeError('Network request failed'));
+    serveSearch(() => Promise.reject(new TypeError('Network request failed')));
     const r = await mount(<SearchScreen />);
     await act(async () =>
       r.root.findByType(TextInput).props.onChangeText('ivy'),

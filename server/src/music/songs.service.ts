@@ -36,6 +36,7 @@ const MAX_RESULTS = 50;
 const HOUR = 60 * 60 * 1000;
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const APPLE_ID = /^\d{1,20}$/;
+const GENRE_ID = /^\d{1,6}$/;
 
 export interface SearchResponse {
   results: SearchResult[];
@@ -48,6 +49,12 @@ export interface SearchResponse {
 export interface AlbumResponse {
   album: AlbumResult;
   tracks: SearchResult[];
+}
+
+export interface ChartsResponse {
+  /** Most played first. */
+  songs: SearchResult[];
+  albums: AlbumResult[];
 }
 
 interface AppleSearch {
@@ -72,6 +79,8 @@ export class SongsService {
   /** Apple song id -> mapped song, from searches and tracklists; lets /resolve skip a lookup */
   private readonly appleSongs = new TtlCache<MappedAppleSong>(24 * HOUR, 10_000);
   private readonly appleAlbums = new TtlCache<AlbumResponse>(24 * HOUR, 500);
+  /** genre id ("all" for everything) -> chart; Apple updates charts through the day */
+  private readonly appleCharts = new TtlCache<AppleSearch>(HOUR, 100);
   /** requests already waiting on a catalog, so identical ones share one call */
   private readonly inFlight = new Map<string, Promise<unknown>>();
 
@@ -121,6 +130,31 @@ export class SongsService {
       this.appleAlbums.get(externalId) ??
       (await this.shared(`album:${externalId}`, () => this.fetchAppleAlbum(externalId)));
     return { album: { ...found.album }, tracks: await this.withSongIds(found.tracks) };
+  }
+
+  /** The most-played songs and albums on Apple Music right now, overall or for one genre. */
+  async charts(genre: unknown): Promise<ChartsResponse> {
+    if (genre !== undefined && genre !== '' && (typeof genre !== 'string' || !GENRE_ID.test(genre))) {
+      throw new BadRequestException('genre must be an Apple Music genre id (digits)');
+    }
+    if (!this.apple.enabled) {
+      throw new ServiceUnavailableException('Charts need Apple Music, which isn’t set up on this server.');
+    }
+    const key = typeof genre === 'string' && genre ? genre : 'all';
+    let found: AppleSearch;
+    try {
+      found = this.appleCharts.get(key) ?? (await this.shared(`charts:${key}`, () => this.fetchAppleCharts(key)));
+    } catch (err) {
+      if (err instanceof AppleMusicUnavailableError || err instanceof AppleMusicNotFoundError) {
+        this.log.warn(`Apple Music chart "${key}" failed: ${err.message}`);
+        throw new ServiceUnavailableException('Charts are unavailable right now. Try again in a moment.');
+      }
+      throw err;
+    }
+    return {
+      songs: await this.withSongIds(found.songs.map(m => m.result)),
+      albums: found.albums.map(a => ({ ...a })),
+    };
   }
 
   /** Creates (or finds) the canonical AUX song for a catalog song. */
@@ -300,6 +334,18 @@ export class SongsService {
     };
     for (const m of found.songs) this.appleSongs.set(m.result.externalId, m);
     this.appleSearches.set(key, found);
+    return found;
+  }
+
+  private async fetchAppleCharts(key: string): Promise<AppleSearch> {
+    const { songs, albums } = await this.apple.charts(key === 'all' ? undefined : key);
+    const found = {
+      songs: dedupeAppleSongs(songs),
+      albums: albums.map(mapAppleAlbum).filter((a): a is AlbumResult => a !== null),
+    };
+    // Chart songs get ranked straight from Home, so /resolve shouldn't need another lookup.
+    for (const m of found.songs) this.appleSongs.set(m.result.externalId, m);
+    this.appleCharts.set(key, found);
     return found;
   }
 
