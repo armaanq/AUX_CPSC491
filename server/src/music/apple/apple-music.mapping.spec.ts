@@ -5,6 +5,7 @@ import {
   mainGenre,
   mapAppleAlbum,
   mapAppleSong,
+  previewUrl,
 } from './apple-music.mapping.js';
 import {
   amBlonde,
@@ -88,5 +89,23 @@ describe('dedupeAppleSongs', () => {
   it('treats the same ISRC as the same recording even when the title differs', () => {
     const renamed = { ...amIvyOnCompilation, attributes: { ...amIvyOnCompilation.attributes!, name: 'Ivy (Radio Edit)' } };
     expect(dedupeAppleSongs([amIvy, renamed])).toHaveLength(1);
+  });
+});
+
+describe('previewUrl', () => {
+  const clip = 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview/ivy.m4a';
+
+  it('takes the first preview clip', () => {
+    const song = { ...amIvy, attributes: { ...amIvy.attributes!, previews: [{ url: clip }] } };
+    expect(previewUrl(song)).toBe(clip);
+    expect(mapAppleSong(song)?.previewUrl).toBe(clip);
+  });
+
+  it('is null when Apple has no clip, or the url is not https', () => {
+    expect(previewUrl(amIvy)).toBeNull();
+    expect(mapAppleSong(amIvy)?.previewUrl).toBeNull();
+    const http = { ...amIvy, attributes: { ...amIvy.attributes!, previews: [{ url: 'http://example.com/a.m4a' }] } };
+    expect(previewUrl(http)).toBeNull();
+    expect(previewUrl(undefined)).toBeNull();
   });
 });

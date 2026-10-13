@@ -119,6 +119,16 @@ describe('AppleMusicClient', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://api.music.apple.com/v1/catalog/us/albums/1146195596');
   });
 
+  it('finds songs by ISRC', async () => {
+    fetchMock.mockReturnValueOnce(reply(200, { data: [amIvy] })).mockReturnValueOnce(reply(200, {}));
+    const client = new AppleMusicClient();
+    await expect(client.songsByIsrc('QZ5C81600002')).resolves.toEqual([amIvy]);
+    await expect(client.songsByIsrc('QZ5C81600003')).resolves.toEqual([]);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://api.music.apple.com/v1/catalog/us/songs?filter%5Bisrc%5D=QZ5C81600002',
+    );
+  });
+
   it('turns failures into not-found and unavailable errors', async () => {
     const client = new AppleMusicClient();
     fetchMock.mockReturnValueOnce(reply(404, { errors: [] }));

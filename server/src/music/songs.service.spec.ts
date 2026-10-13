@@ -39,6 +39,7 @@ function setup({ appleMusic = false } = {}) {
     song: vi.fn().mockResolvedValue(amIvy),
     album: vi.fn().mockResolvedValue(amBlondeWithTracks),
     charts: vi.fn().mockResolvedValue({ songs: [amNights, amIvy], albums: [amBlonde] }),
+    songsByIsrc: vi.fn().mockResolvedValue([]),
   };
   const prisma = {
     song: {
@@ -495,5 +496,58 @@ describe('SongsService.importPlaylist', () => {
     await expect(service.importPlaylist('spotify:playlist:37i9dQZF1DXcBWIGoYBM5M')).rejects.toThrow(
       NotFoundException,
     );
+  });
+});
+
+describe('SongsService.preview', () => {
+  const clip = 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview/ivy.m4a';
+  const withClip = { ...amIvy, attributes: { ...amIvy.attributes!, previews: [{ url: clip }] } };
+
+  it('looks up an Apple song by id once, then serves it from cache', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    apple.song.mockResolvedValue(withClip);
+    expect(await service.preview('apple', amIvy.id, undefined)).toEqual({ url: clip });
+    expect(await service.preview('apple', amIvy.id, undefined)).toEqual({ url: clip });
+    expect(apple.song).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the clip from a search without calling Apple again', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    apple.search.mockResolvedValue({ songs: [withClip], albums: [] });
+    await service.search('ivy');
+    expect(await service.preview('apple', amIvy.id, undefined)).toEqual({ url: clip });
+    expect(apple.song).not.toHaveBeenCalled();
+  });
+
+  it('finds songs from other catalogs by ISRC', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    apple.songsByIsrc.mockResolvedValue([amIvyOnCompilation, withClip]);
+    expect(await service.preview('musicbrainz', 'whatever', 'usum71607007')).toEqual({ url: clip });
+    expect(apple.songsByIsrc).toHaveBeenCalledWith('USUM71607007');
+  });
+
+  it('answers null when Apple has no clip or no such song', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    expect(await service.preview('musicbrainz', 'x', 'USUM71607007')).toEqual({ url: null });
+    apple.song.mockRejectedValue(new AppleMusicNotFoundError('gone'));
+    expect(await service.preview('apple', '123', undefined)).toEqual({ url: null });
+  });
+
+  it('answers null on a server without Apple Music', async () => {
+    const { service, apple } = setup();
+    expect(await service.preview('apple', amIvy.id, undefined)).toEqual({ url: null });
+    expect(apple.song).not.toHaveBeenCalled();
+  });
+
+  it('rejects requests with nothing to look up', async () => {
+    const { service } = setup({ appleMusic: true });
+    await expect(service.preview('apple', 'not-digits', undefined)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.preview('musicbrainz', 'x', 'nope')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('reports Apple outages as 503', async () => {
+    const { service, apple } = setup({ appleMusic: true });
+    apple.song.mockRejectedValue(new AppleMusicUnavailableError('down'));
+    await expect(service.preview('apple', amIvy.id, undefined)).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });

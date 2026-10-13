@@ -61,6 +61,27 @@ export function getAlbum(source: CatalogSource, externalId: string) {
   );
 }
 
+/**
+ * Apple Music's 30-second clip for a song, or null when there isn't one.
+ * Apple songs are found by id; MusicBrainz and Spotify songs by ISRC.
+ */
+export async function getPreviewUrl(song: {
+  source?: CatalogSource;
+  externalId?: string;
+  isrc?: string;
+}): Promise<string | null> {
+  const params: string[] = [];
+  if (song.source === 'apple' && song.externalId) {
+    params.push(`source=apple&externalId=${encodeURIComponent(song.externalId)}`);
+  }
+  if (song.isrc) params.push(`isrc=${encodeURIComponent(song.isrc)}`);
+  if (!params.length) return null;
+  const { url } = await request<{ url: string | null }>(
+    `/songs/preview?${params.join('&')}`,
+  );
+  return url;
+}
+
 /** Creates (or finds) the canonical AUX song. Call when a user acts on a song. */
 export function resolveSong(source: CatalogSource, externalId: string) {
   return request<{ id: string }>('/songs/resolve', {

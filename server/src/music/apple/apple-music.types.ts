@@ -20,6 +20,8 @@ export interface AmSong {
     isrc?: string;
     genreNames?: string[];
     artwork?: AmArtwork;
+    /** 30-second clips Apple hosts for anyone to stream. Usually one AAC file. */
+    previews?: { url: string; hlsUrl?: string }[];
     /** e.g. https://music.apple.com/us/album/ivy/1146195596?i=1146195713 */
     url: string;
   };

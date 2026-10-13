@@ -8,6 +8,8 @@ const ARTWORK_PX = 600;
 /** A song from Apple Music plus the album details needed to save it later. */
 export interface MappedAppleSong {
   result: SearchResult;
+  /** Apple's 30-second clip, if it has one. Kept out of SearchResult; the app asks GET /songs/preview. */
+  previewUrl: string | null;
   album: {
     externalId: string;
     title: string;
@@ -19,6 +21,12 @@ export interface MappedAppleSong {
 
 export function artworkUrl(artwork: AmArtwork | undefined): string | null {
   return artwork?.url ? artwork.url.replace('{w}', String(ARTWORK_PX)).replace('{h}', String(ARTWORK_PX)) : null;
+}
+
+/** The streamable 30-second clip. Only https URLs; the app plays whatever this returns. */
+export function previewUrl(song: AmSong | undefined): string | null {
+  const url = song?.attributes?.previews?.find(p => typeof p?.url === 'string')?.url;
+  return url && url.startsWith('https://') ? url : null;
 }
 
 /** Apple lists "Music" as a genre on everything; the first real one is the useful one. */
@@ -38,6 +46,7 @@ export function mapAppleSong(song: AmSong): MappedAppleSong | null {
   const albumId = albumIdFromUrl(a.url);
   const releaseYear = yearOf(a.releaseDate);
   return {
+    previewUrl: previewUrl(song),
     result: {
       source: 'apple',
       externalId: song.id,

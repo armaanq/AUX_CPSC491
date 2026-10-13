@@ -104,6 +104,12 @@ export class AppleMusicClient {
     return this.only(await this.get<AmDataResponse<AmSong>>(`/songs/${encodeURIComponent(id)}`), id);
   }
 
+  /** Every catalog song with this ISRC (the same recording can be on a single and an album). */
+  async songsByIsrc(isrc: string): Promise<AmSong[]> {
+    const params = new URLSearchParams({ 'filter[isrc]': isrc });
+    return (await this.get<AmDataResponse<AmSong>>(`/songs?${params}`)).data ?? [];
+  }
+
   /** One album, including its tracklist. */
   async album(id: string): Promise<AmAlbum> {
     return this.only(await this.get<AmDataResponse<AmAlbum>>(`/albums/${encodeURIComponent(id)}`), id);

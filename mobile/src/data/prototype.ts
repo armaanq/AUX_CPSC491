@@ -15,6 +15,8 @@ export type Music = {
   source?: CatalogSource;
   externalId?: string;
   externalUrl?: string;
+  /** Recording code shared across catalogs; finds a preview for non-Apple songs. */
+  isrc?: string;
   /** AUX song id, once anyone has ranked it (lets the app ask for its AUX score). */
   songId?: string;
 };
@@ -146,6 +148,7 @@ export function musicFromSearch(r: SearchResult): Music {
     source: r.source,
     externalId: r.externalId,
     externalUrl: r.externalUrl,
+    isrc: r.isrc ?? undefined,
     songId: r.songId ?? undefined,
   };
 }
@@ -169,7 +172,10 @@ export function registerMusic(items: Music[]) {
     const known = music.find(m => m.id === item.id);
     if (!known) music.push(item);
     // A song seen before anyone ranked it learns its AUX id later.
-    else if (item.songId && !known.songId) known.songId = item.songId;
+    else {
+      if (item.songId && !known.songId) known.songId = item.songId;
+      if (item.isrc && !known.isrc) known.isrc = item.isrc;
+    }
   });
 }
 /** Records the AUX song id for a catalog song once it's resolved. */
