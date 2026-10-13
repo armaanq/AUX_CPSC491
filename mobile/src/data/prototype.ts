@@ -38,6 +38,12 @@ export const SENTIMENT_LABELS: Record<Sentiment, string> = {
   FINE: 'It was fine',
   DISLIKED: 'Didn’t like it',
 };
+/** The reaction a 0-10 score falls in, using the band edges above. */
+export function sentimentForScore(score: number): Sentiment {
+  if (score >= SENTIMENT_BANDS.LOVED.min) return 'LOVED';
+  if (score >= SENTIMENT_BANDS.FINE.min) return 'FINE';
+  return 'DISLIKED';
+}
 export function scoreFor(
   sentiment: Sentiment,
   indexInBand: number,
@@ -66,11 +72,7 @@ function fromSampleScores(list: { musicId: string; score: number }[]) {
       .map(r => ({
         musicId: r.musicId,
         score: r.score,
-        sentiment: (r.score >= SENTIMENT_BANDS.LOVED.min
-          ? 'LOVED'
-          : r.score >= SENTIMENT_BANDS.FINE.min
-          ? 'FINE'
-          : 'DISLIKED') as Sentiment,
+        sentiment: sentimentForScore(r.score),
       })),
   );
 }
@@ -115,6 +117,9 @@ music
       });
   });
 export const findMusic = (id: string) => music.find(m => m.id === id)!;
+/** Only real catalog songs can be ranked; albums and built-in samples can't. */
+export const isRankable = (m: Music | undefined): boolean =>
+  !!m && m.kind === 'song' && !!m.source;
 const ID_PREFIX: Record<CatalogSource, string> = {
   apple: 'ap',
   musicbrainz: 'mb',
