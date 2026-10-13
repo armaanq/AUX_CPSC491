@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, TextInput } from 'react-native';
 import TestRenderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Keychain from 'react-native-keychain';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { API_BASE_URL, USING_LOCAL_SERVER } from '../src/api/config';
 import {
@@ -17,7 +18,8 @@ import {
   musicFromSearch,
   registerMusic,
 } from '../src/data/prototype';
-import { MusicDetailScreen, SearchScreen } from '../src/screens/DiscoverScreens';
+import { DiscoverScreen } from '../src/screens/DiscoverScreen';
+import { MusicDetailScreen } from '../src/screens/MusicDetailScreen';
 import { AuthProvider } from '../src/state/AuthProvider';
 import { RankingsProvider } from '../src/state/RankingsProvider';
 import { clearChartsCache } from '../src/state/useCharts';
@@ -31,7 +33,16 @@ const mockPush = jest.fn();
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
   useNavigation: () => ({ navigate: mockNavigate, push: mockPush }),
+  useRoute: () => ({ params: undefined }),
 }));
+/** Discover shows your scores, so it needs the logged-in providers. */
+const SearchScreen = () => (
+  <AuthProvider>
+    <RankingsProvider>
+      <DiscoverScreen />
+    </RankingsProvider>
+  </AuthProvider>
+);
 
 const ivy: SearchResult = {
   source: 'apple',
@@ -174,7 +185,7 @@ describe('api client', () => {
   });
 });
 
-describe('SearchScreen', () => {
+describe('Discover search', () => {
   it('waits for typing to pause, then shows songs and albums with Apple Music credit', async () => {
     jest.useFakeTimers();
     serveSearch(() =>
@@ -192,8 +203,10 @@ describe('SearchScreen', () => {
     await act(async () => {});
     expect(searchCalls()).toHaveLength(1);
     expect(texts(r)).toContain('Frank Ocean · Blonde');
-    expect(texts(r)).toContain('Frank Ocean · album');
     expect(texts(r)).toContain('Results from Apple Music');
+    // Albums are one tap away, under their own filter.
+    await choose(r, 'Albums');
+    expect(texts(r)).toContain('Frank Ocean · album');
     expect(findMusic('ap:1146195713').title).toBe('Ivy');
     expect(findMusic('ap-album:1146195596').kind).toBe('album');
     await act(async () => r.unmount());
@@ -337,5 +350,37 @@ describe('album page', () => {
     expect(texts(r)).toContain('Couldn’t load the songs');
     expect(texts(r)).toContain('Apple Music is busy.');
     await act(async () => r.unmount());
+  });
+});
+
+describe('song page', () => {
+  it('puts your score next to AUX’s and says how far apart they are', async () => {
+    const SONG_ID = '00000000-0000-4000-8000-000000000001';
+    await Keychain.setGenericPassword('armaan', 'tok', { service: 'com.aux.session' });
+    const item = musicFromSearch({ ...ivy, songId: SONG_ID });
+    registerMusic([item]);
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith('/me')) return ok({ id: 'u1', email: 'a@b.c', username: 'armaan', bio: '', avatarUrl: null, favoriteGenres: [], createdAt: '2026-10-01T00:00:00.000Z' });
+      if (url.endsWith('/me/rankings'))
+        return ok({ rankings: [{ sentiment: 'LOVED', position: 0, score: 9.5, rankedAt: '2026-10-01T00:00:00.000Z', song: { ...ivy, id: SONG_ID } }] });
+      if (url.includes('/charts/community/songs'))
+        return ok({ stats: [{ songId: SONG_ID, listeners: 6, averageScore: 7.25 }] });
+      return ok({});
+    });
+    const r = await mount(
+      <AuthProvider>
+        <RankingsProvider>
+          <MusicDetailScreen route={{ params: { musicId: item.id } } as never} navigation={{} as never} />
+        </RankingsProvider>
+      </AuthProvider>,
+    );
+    await act(async () => {});
+    await act(async () => {});
+    const t = texts(r);
+    expect(t).toMatch(/YOU\n9\.50\nYour score/);
+    expect(t).toMatch(/AUX\n7\.25\n6 listeners/);
+    expect(t).toContain('You rate it 2.25 higher than AUX does.');
+    await act(async () => r.unmount());
+    await Keychain.resetGenericPassword({ service: 'com.aux.session' });
   });
 });

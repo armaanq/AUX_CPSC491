@@ -28,6 +28,14 @@ import {
 } from './musicbrainz/musicbrainz.client.js';
 import { dedupeRecordings, mapRecording, type MappedRecording } from './musicbrainz/mapping.js';
 import { normalizeQuery, tokenize } from './musicbrainz/query.js';
+import { pickMatch, searchTextFor } from './playlists/match.js';
+import { parsePlaylistLink } from './playlists/playlist-link.js';
+import {
+  SpotifyEmbedClient,
+  SpotifyEmbedUnavailableError,
+  SpotifyPlaylistNotFoundError,
+  type PlaylistEntry,
+} from './playlists/spotify-embed.js';
 import { TtlCache } from './ttl-cache.js';
 
 export const MIN_QUERY_LENGTH = 2;
@@ -56,6 +64,23 @@ export interface ChartsResponse {
   songs: SearchResult[];
   albums: AlbumResult[];
 }
+
+export interface PlaylistImportResponse {
+  /** The playlist's name, as the source app shows it. */
+  name: string;
+  provider: 'apple' | 'spotify';
+  /** Playlist order, one entry per song (duplicates removed). */
+  tracks: SearchResult[];
+  /** Songs from the playlist AUX couldn't find in its catalog. */
+  unmatched: PlaylistEntry[];
+  /** True when the playlist was longer than AUX reads in one import. */
+  truncated: boolean;
+}
+
+/** The most Spotify playlist songs matched in one import (each is a catalog search). */
+const SPOTIFY_IMPORT_LIMIT = 150;
+/** Catalog searches run at once while matching a Spotify playlist. */
+const MATCH_CONCURRENCY = 4;
 
 interface AppleSearch {
   songs: MappedAppleSong[];
@@ -88,6 +113,7 @@ export class SongsService {
     private readonly prisma: PrismaService,
     private readonly mb: MusicBrainzClient,
     private readonly apple: AppleMusicClient,
+    private readonly spotify: SpotifyEmbedClient = new SpotifyEmbedClient(),
   ) {}
 
   async search(raw: string | undefined): Promise<SearchResponse> {
@@ -154,6 +180,107 @@ export class SongsService {
     return {
       songs: await this.withSongIds(found.songs.map(m => m.result)),
       albums: found.albums.map(a => ({ ...a })),
+    };
+  }
+
+  /**
+   * The songs in an Apple Music or Spotify playlist link, as catalog songs the
+   * app can queue for ranking. Nothing is saved: the app resolves each song
+   * when the user ranks it, like any search result.
+   *
+   * Apple Music playlists are read through the Apple Music API, so every song
+   * comes with its catalog id. Spotify playlists are read from Spotify's public
+   * embed page (titles and artists only), then each song is found by searching
+   * Apple Music; songs without a confident match are returned as `unmatched`.
+   */
+  async importPlaylist(url: unknown): Promise<PlaylistImportResponse> {
+    const link = parsePlaylistLink(url);
+    if (!link) {
+      throw new BadRequestException('Paste a playlist link from Apple Music or Spotify.');
+    }
+    if (!this.apple.enabled) {
+      throw new ServiceUnavailableException('Importing playlists needs Apple Music, which isn’t set up on this server.');
+    }
+
+    if (link.provider === 'apple') {
+      let found;
+      try {
+        found = await this.apple.playlist(link.id, link.storefront);
+      } catch (err) {
+        throw this.appleError(err, 'That playlist isn’t on Apple Music. Make sure it’s shared publicly.');
+      }
+      const tracks = dedupeAppleSongs(found.songs).map(m => {
+        this.appleSongs.set(m.result.externalId, m);
+        return m.result;
+      });
+      return {
+        name: found.name,
+        provider: 'apple',
+        tracks: await this.withSongIds(tracks),
+        unmatched: [],
+        truncated: found.truncated,
+      };
+    }
+
+    let spotifyId: string;
+    if (link.provider === 'spotify-short') {
+      let resolved: string | null;
+      try {
+        resolved = await this.spotify.resolveShortLink(link.url);
+      } catch (err) {
+        if (err instanceof SpotifyPlaylistNotFoundError) {
+          throw new NotFoundException('That Spotify link doesn’t exist anymore. Copy it again from Spotify.');
+        }
+        if (err instanceof SpotifyEmbedUnavailableError) {
+          throw new ServiceUnavailableException('Spotify can’t be reached right now. Try again, or use an Apple Music link.');
+        }
+        throw err;
+      }
+      if (!resolved) {
+        throw new BadRequestException('That Spotify link isn’t a playlist. Share a playlist, not a song or album.');
+      }
+      spotifyId = resolved;
+    } else {
+      spotifyId = link.id;
+    }
+
+    let parsed;
+    try {
+      parsed = await this.spotify.playlist(spotifyId);
+    } catch (err) {
+      if (err instanceof SpotifyPlaylistNotFoundError) {
+        throw new NotFoundException('That Spotify playlist is private or doesn’t exist. Make it public and try again.');
+      }
+      if (err instanceof SpotifyEmbedUnavailableError) {
+        this.log.warn(`Spotify playlist ${spotifyId} couldn't be read: ${err.message}`);
+        throw new ServiceUnavailableException('Spotify playlists can’t be read right now. Try an Apple Music link.');
+      }
+      throw err;
+    }
+    const entries = parsed.entries.slice(0, SPOTIFY_IMPORT_LIMIT);
+    const matches = await mapLimit(entries, MATCH_CONCURRENCY, async entry => {
+      try {
+        return pickMatch(entry, (await this.search(searchTextFor(entry))).results);
+      } catch {
+        return null;
+      }
+    });
+    const seen = new Set<string>();
+    const tracks: SearchResult[] = [];
+    const unmatched: PlaylistEntry[] = [];
+    matches.forEach((match, i) => {
+      if (!match) unmatched.push(entries[i]);
+      else if (!seen.has(`${match.source}:${match.externalId}`)) {
+        seen.add(`${match.source}:${match.externalId}`);
+        tracks.push(match);
+      }
+    });
+    return {
+      name: parsed.name ?? 'Spotify playlist',
+      provider: 'spotify',
+      tracks,
+      unmatched,
+      truncated: parsed.entries.length > SPOTIFY_IMPORT_LIMIT,
     };
   }
 
@@ -483,4 +610,18 @@ export class SongsService {
       throw err;
     }
   }
+}
+
+/** Runs `fn` over `items` with at most `limit` running at once; results keep input order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = Array.from({ length: items.length });
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }

@@ -5,11 +5,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { AlbumResult, SearchResult } from '../src/api/songs';
-import {
-  GlobalRankingsScreen,
-  HomeScreen,
-  SearchScreen,
-} from '../src/screens/DiscoverScreens';
+import { TextInput } from 'react-native';
+import { AddScreen } from '../src/screens/AddScreen';
+import { DiscoverScreen } from '../src/screens/DiscoverScreen';
+import { Hot100Screen } from '../src/screens/Hot100Screen';
+import { LibraryScreen } from '../src/screens/LibraryScreen';
+import { ProfileScreen } from '../src/screens/ProfileScreen';
+import { RankScreen, topGenres } from '../src/screens/RankScreen';
+import { musicFromSearch, registerMusic } from '../src/data/prototype';
+import { clearSongStatsCache } from '../src/state/useSongStats';
 import { AuthProvider } from '../src/state/AuthProvider';
 import { PrototypeProvider } from '../src/state/PrototypeProvider';
 import { RankingsProvider } from '../src/state/RankingsProvider';
@@ -19,6 +23,7 @@ const mockNavigate = jest.fn();
 jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('@react-navigation/native'),
   useNavigation: () => ({ navigate: mockNavigate, push: mockNavigate }),
+  useRoute: () => ({ params: undefined }),
 }));
 
 const user = {
@@ -134,6 +139,7 @@ beforeEach(async () => {
   fetchMock.mockReset();
   mockNavigate.mockReset();
   clearChartsCache();
+  clearSongStatsCache();
   await AsyncStorage.clear();
   // Logged in, so the screens can load your rankings too.
   await Keychain.setGenericPassword('armaan', 'tok', {
@@ -141,116 +147,264 @@ beforeEach(async () => {
   });
 });
 
-describe('Home', () => {
-  it('shows Apple Music’s top albums and songs, with your score on songs you ranked', async () => {
+const ranked = (
+  r: SearchResult,
+  id: string,
+  sentiment: 'LOVED' | 'FINE' | 'DISLIKED',
+  position: number,
+  score: number,
+) => ({
+  sentiment,
+  position,
+  score,
+  rankedAt: `2026-10-1${position}T00:00:00.000Z`,
+  song: { ...r, id },
+});
+const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+describe('Hot 100', () => {
+  it('shows the top 100 with AUX averages, listener counts and your own score', async () => {
     serve({
       '/me': () => user,
-      '/me/rankings': () => ({
-        rankings: [
-          {
-            sentiment: 'LOVED',
-            position: 0,
-            score: 10,
-            rankedAt: '2026-10-12T00:00:00.000Z',
-            song: { ...texas, id: 'aux-texas' },
-          },
+      '/me/rankings': () => ({ rankings: [ranked(texas, ID(2), 'LOVED', 0, 10)] }),
+      '/charts/community?limit=100': () => ({
+        entries: [
+          { song: { ...eclipse, id: ID(1) }, listeners: 3, averageScore: 9.44 },
+          { song: { ...texas, id: ID(2) }, listeners: 1, averageScore: 8.34 },
         ],
       }),
-      '/charts': () => ({ songs: [eclipse, texas], albums: [habibti] }),
     });
-    const r = await show(<HomeScreen />);
+    const r = await show(<Hot100Screen />);
     const t = texts(r);
-    expect(t).toContain('Top albums');
-    expect(t).toContain('HABIBTI (FOMO)');
-    expect(t).toContain('Top songs');
-    expect(t).toMatch(/1\nSolar Eclipse/);
-    expect(t).toMatch(/2\nChoosin’ Texas\nElla Langley\n10\.00/);
-    expect(t).toContain('Charts from Apple Music');
-    // The built-in sample albums are gone from Home.
-    expect(t).not.toContain('Your next listen');
-    expect(t).not.toContain('CURATED PICKS');
+    expect(t).toMatch(/1\nSolar Eclipse\nDrake & Don Toliver · 3 listeners\nAUX\n9\.44/);
+    expect(t).toMatch(/2\nChoosin’ Texas\nElla Langley · 1 listener\nYOU\n10\.00\nAUX\n8\.34/);
   });
 
-  it('says so when the charts can’t load, and the rest of Home still works', async () => {
+  it('switches to one genre’s chart', async () => {
     serve({
       '/me': () => user,
       '/me/rankings': () => ({ rankings: [] }),
-      '/charts': () => {
-        throw new Error('Charts are unavailable right now.');
-      },
+      '/charts/community?limit=100': () => ({
+        entries: [{ song: { ...eclipse, id: ID(1) }, listeners: 3, averageScore: 9.44 }],
+      }),
+      '/charts/community?genre=hip-hop&limit=100': () => ({
+        entries: [{ song: { ...janice, id: ID(3) }, listeners: 2, averageScore: 8.1 }],
+      }),
     });
-    const r = await show(<HomeScreen />);
-    expect(texts(r)).toContain('Charts are unavailable right now.');
-    expect(texts(r)).toContain('In your circle');
+    const r = await show(<Hot100Screen />);
+    await choose(r, 'Hip-Hop');
+    expect(texts(r)).toContain('Janice STFU');
+    expect(texts(r)).not.toContain('Solar Eclipse');
+  });
+
+  it('invites the first ranking when a chart is empty', async () => {
+    serve({
+      '/me': () => user,
+      '/me/rankings': () => ({ rankings: [] }),
+      '/charts/community?limit=100': () => ({ entries: [] }),
+    });
+    const r = await show(<Hot100Screen />);
+    expect(texts(r)).toContain('An open spot at the top');
   });
 });
 
 describe('Discover', () => {
-  it('shows the chart before you search, and each genre’s chart when you pick it', async () => {
+  it('lists your hottest takes: the biggest gaps between you and AUX', async () => {
     serve({
       '/me': () => user,
-      '/me/rankings': () => ({ rankings: [] }),
-      '/charts': () => ({ songs: [eclipse], albums: [habibti] }),
-      '/charts?genre=18': () => ({ songs: [janice], albums: [] }),
+      '/me/rankings': () => ({
+        rankings: [
+          ranked(eclipse, ID(1), 'LOVED', 0, 10),
+          ranked(texas, ID(2), 'LOVED', 1, 6.67),
+        ],
+      }),
+      '/charts': () => ({ songs: [janice], albums: [habibti] }),
+      [`/charts/community/songs?ids=${ID(1)},${ID(2)}`]: () => ({
+        stats: [
+          { songId: ID(1), listeners: 4, averageScore: 9.6 },
+          { songId: ID(2), listeners: 3, averageScore: 9.1 },
+        ],
+      }),
     });
-    const r = await show(<SearchScreen />);
-    expect(texts(r)).toContain('Solar Eclipse');
-    expect(texts(r)).toContain('HABIBTI (FOMO)');
-    expect(texts(r)).not.toContain('Explore the collection');
-
-    await choose(r, 'Hip-Hop');
-    expect(calls('/charts?genre=18')).toBe(1);
-    expect(texts(r)).toContain('Janice STFU');
-    expect(texts(r)).not.toContain('Solar Eclipse');
-
-    // Going back to all genres reuses the chart it already loaded.
-    await choose(r, 'All genres');
-    expect(texts(r)).toContain('Solar Eclipse');
-    expect(calls('/charts')).toBe(1);
+    const r = await show(<DiscoverScreen />);
+    await act(async () => {});
+    const t = texts(r);
+    // Texas is 2.43 below AUX, Eclipse only 0.40 above: Texas comes first.
+    expect(t).toMatch(/Choosin’ Texas\n−2\.43 below AUX · Ella Langley/);
+    expect(t.indexOf('Choosin’ Texas')).toBeLessThan(t.indexOf('Solar Eclipse'));
+    expect(t).toContain('Trending on Apple Music');
+    expect(t).toContain('Janice STFU');
   });
 
-  it('applies the Songs and Albums filters to the chart', async () => {
+  it('shows your score and AUX’s next to search results', async () => {
     serve({
       '/me': () => user,
-      '/me/rankings': () => ({ rankings: [] }),
-      '/charts': () => ({ songs: [eclipse], albums: [habibti] }),
+      '/me/rankings': () => ({ rankings: [ranked(eclipse, ID(1), 'LOVED', 0, 10)] }),
+      '/charts': () => ({ songs: [], albums: [] }),
+      '/songs/search?q=drake': () => ({
+        results: [{ ...eclipse, songId: ID(1) }, janice],
+        albums: [habibti],
+        usedFallback: false,
+      }),
+      [`/charts/community/songs?ids=${ID(1)}`]: () => ({
+        stats: [{ songId: ID(1), listeners: 5, averageScore: 8.75 }],
+      }),
     });
-    const r = await show(<SearchScreen />);
-    await choose(r, 'Songs');
-    expect(texts(r)).toContain('Solar Eclipse');
-    expect(texts(r)).not.toContain('HABIBTI (FOMO)');
+    const r = await show(<DiscoverScreen />);
+    await act(async () => r.root.findByType(TextInput).props.onChangeText('drake'));
+    await act(async () => {
+      await new Promise<void>(res => setTimeout(res, 450));
+    });
+    await act(async () => {});
+    const t = texts(r);
+    expect(t).toMatch(/Solar Eclipse\n.*\nYOU\n10\.00\nAUX\n8\.75/);
+    // Nobody has ranked Janice: both scores are blank.
+    expect(t).toMatch(/Janice STFU\n.*\nYOU\n—\nAUX\n—/);
     await choose(r, 'Albums');
     expect(texts(r)).toContain('HABIBTI (FOMO)');
+  });
+});
+
+describe('Rank', () => {
+  it('puts your queue first and suggests charting songs in genres you love', async () => {
+    const queued = musicFromSearch(janice);
+    registerMusic([queued]);
+    serve({
+      '/me': () => user,
+      '/me/rankings': () => ({ rankings: [ranked(eclipse, ID(1), 'LOVED', 0, 10)] }),
+      // You love a Hip-Hop/Rap song, so the hip-hop chart (18) is asked for.
+      '/charts?genre=18': () => ({ songs: [eclipse, texas], albums: [] }),
+      '/charts': () => ({ songs: [texas], albums: [] }),
+    });
+    const r = await show(<RankScreen />);
+    await act(async () => {});
+    // The rank queue is device state: add Janice, then look again.
+    const add = r.root.find(
+      n => n.props.accessibilityLabel === 'Add Choosin’ Texas to queue',
+    );
+    await act(async () => add.props.onPress());
+    const t = texts(r);
+    expect(t).toContain('UP NEXT');
+    expect(t).toMatch(/UP NEXT\nChoosin’ Texas/);
+    // Already-ranked Solar Eclipse is never suggested.
+    expect(t).not.toMatch(/Solar Eclipse\nDrake & Don Toliver · Big in/);
+    expect(calls('/charts?genre=18')).toBe(1);
+  });
+
+  it('ranks your favourite genres by how much you love them', () => {
+    registerMusic([
+      musicFromSearch(song('901', 'Rap One', 'A')),
+      musicFromSearch({ ...song('902', 'Country One', 'B'), genre: 'Country' }),
+      musicFromSearch({ ...song('903', 'Hated', 'C'), genre: 'Rock' }),
+    ]);
+    // One loved country song outweighs one fine rap song; disliked genres never count.
+    expect(
+      topGenres([
+        { musicId: 'ap:901', sentiment: 'FINE' },
+        { musicId: 'ap:902', sentiment: 'LOVED' },
+        { musicId: 'ap:903', sentiment: 'DISLIKED' },
+      ]),
+    ).toEqual(['6', '18']);
+  });
+});
+
+describe('Library', () => {
+  it('lists your rankings best first, grouped by reaction, with real positions when filtered', async () => {
+    serve({
+      '/me': () => user,
+      '/me/rankings': () => ({
+        rankings: [
+          ranked(eclipse, ID(1), 'LOVED', 0, 10),
+          ranked(texas, ID(2), 'FINE', 0, 6.66),
+          ranked(janice, ID(3), 'DISLIKED', 0, 3.33),
+        ],
+      }),
+    });
+    const r = await show(<LibraryScreen />);
+    const t = texts(r);
+    expect(t).toMatch(/LOVED IT\n1 song\n1\nSolar Eclipse/);
+    expect(t).toMatch(/IT WAS FINE\n1 song\n2\nChoosin’ Texas/);
+    await choose(r, 'Disliked');
+    expect(texts(r)).toMatch(/3\nJanice STFU/);
     expect(texts(r)).not.toContain('Solar Eclipse');
   });
 });
 
-describe('Charts tab', () => {
-  it('shows the AUX chart: average scores and how many people ranked each song', async () => {
+describe('Add', () => {
+  it('reads a playlist link, lets you untick songs, and queues the rest', async () => {
     serve({
       '/me': () => user,
-      '/me/rankings': () => ({ rankings: [] }),
-      '/charts/community': () => ({
-        entries: [
-          { song: { ...eclipse, id: 'a' }, listeners: 3, averageScore: 9.44 },
-          { song: { ...texas, id: 'b' }, listeners: 1, averageScore: 8.34 },
+      '/me/rankings': () => ({ rankings: [ranked(eclipse, ID(1), 'LOVED', 0, 10)] }),
+    });
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      String(url).endsWith('/playlists/import')
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({
+                name: 'Gym',
+                provider: 'spotify',
+                tracks: [eclipse, texas, janice],
+                unmatched: [{ title: 'Lost Song', artist: 'Someone' }],
+                truncated: false,
+              }),
+              { status: 200 },
+            ),
+          )
+        : base(url, init),
+    );
+    const r = await show(<AddScreen />);
+    const input = r.root.findByProps({ accessibilityLabel: 'Playlist link' });
+    await act(async () => input.props.onChangeText('not a link'));
+    await choose(r, 'Find the songs');
+    expect(texts(r)).toContain('doesn’t look like a playlist link');
+
+    await act(async () =>
+      input.props.onChangeText('https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M'),
+    );
+    await choose(r, 'Find the songs');
+    expect(texts(r)).toContain('Found 3 songs · 1 couldn’t be matched');
+    // You already ranked Solar Eclipse, so only two start ticked.
+    expect(texts(r)).toContain('Already ranked');
+    expect(texts(r)).toContain('Add 2 to rank queue');
+    const janiceRow = r.root.find(
+      n => n.props.accessibilityLabel === 'Janice STFU by Drake' && n.props.accessibilityRole === 'checkbox',
+    );
+    await act(async () => janiceRow.props.onPress());
+    await choose(r, 'Add 1 to rank queue');
+    expect(texts(r)).toContain('1 song from “Gym”');
+    expect(JSON.parse((await AsyncStorage.getItem('@aux/prototype/v4'))!).saved).toContain('ap:102');
+  });
+});
+
+describe('Profile', () => {
+  it('sums up your rankings: counts, average, reaction mix, genres and agreement with AUX', async () => {
+    serve({
+      '/me': () => user,
+      '/me/rankings': () => ({
+        rankings: [
+          ranked(eclipse, ID(1), 'LOVED', 0, 10),
+          ranked(texas, ID(2), 'FINE', 0, 5),
+        ],
+      }),
+      [`/charts/community/songs?ids=${ID(1)},${ID(2)}`]: () => ({
+        stats: [
+          { songId: ID(1), listeners: 3, averageScore: 9 },
+          { songId: ID(2), listeners: 1, averageScore: 5 },
         ],
       }),
     });
-    const r = await show(<GlobalRankingsScreen />);
+    const r = await show(<ProfileScreen />);
+    await act(async () => {});
     const t = texts(r);
-    expect(t).toMatch(/1\nSolar Eclipse\nDrake & Don Toliver · 3 listeners\n9\.44/);
-    expect(t).toMatch(/2\nChoosin’ Texas\nElla Langley · 1 listener\n8\.34/);
-    expect(t).not.toContain('SAMPLE CHART');
-  });
-
-  it('invites the first ranking when the chart is empty', async () => {
-    serve({
-      '/me': () => user,
-      '/me/rankings': () => ({ rankings: [] }),
-      '/charts/community': () => ({ entries: [] }),
-    });
-    const r = await show(<GlobalRankingsScreen />);
-    expect(texts(r)).toContain('An open spot at the top');
+    expect(t).toContain('@armaan');
+    expect(t).toMatch(/2\nsongs ranked\n7\.50\naverage score/);
+    expect(t).toMatch(/Loved it\n1/);
+    expect(t).toMatch(/It was fine\n1/);
+    expect(t).toContain('50%');
+    // Only Solar Eclipse has other listeners; you're 1.00 off AUX there.
+    expect(t).toContain('90% in tune');
+    expect(t).toContain('Based on 1 song other people ranked too.');
+    expect(t).toContain('Hip-Hop/Rap');
   });
 });

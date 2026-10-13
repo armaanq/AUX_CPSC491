@@ -15,6 +15,8 @@ export type Music = {
   source?: CatalogSource;
   externalId?: string;
   externalUrl?: string;
+  /** AUX song id, once anyone has ranked it (lets the app ask for its AUX score). */
+  songId?: string;
 };
 // Reaction-first scoring. The user's first reaction picks a band, comparisons
 // place the song inside it, and every song in that band is re-spread so scores
@@ -139,6 +141,7 @@ export function musicFromSearch(r: SearchResult): Music {
     source: r.source,
     externalId: r.externalId,
     externalUrl: r.externalUrl,
+    songId: r.songId ?? undefined,
   };
 }
 export function musicFromAlbum(a: AlbumResult): Music {
@@ -158,8 +161,16 @@ export function musicFromAlbum(a: AlbumResult): Music {
 /** Makes catalog songs findable by id (detail page, rankings, charts). */
 export function registerMusic(items: Music[]) {
   items.forEach(item => {
-    if (!music.some(m => m.id === item.id)) music.push(item);
+    const known = music.find(m => m.id === item.id);
+    if (!known) music.push(item);
+    // A song seen before anyone ranked it learns its AUX id later.
+    else if (item.songId && !known.songId) known.songId = item.songId;
   });
+}
+/** Records the AUX song id for a catalog song once it's resolved. */
+export function setSongId(musicId: string, songId: string) {
+  const item = music.find(m => m.id === musicId);
+  if (item) item.songId = songId;
 }
 export function isCatalogMusic(value: unknown): value is Music {
   const m = value as Music;

@@ -5,8 +5,10 @@ import type {
   AmAlbum,
   AmChartsResponse,
   AmDataResponse,
+  AmPlaylist,
   AmSearchResponse,
   AmSong,
+  AmTracksPage,
 } from './apple-music.types.js';
 
 /** Apple Music isn't set up on this server, or couldn't answer: outage, timeout, rejected key. */
@@ -24,6 +26,10 @@ const RENEW_BEFORE_S = 60 * 60;
 export const APPLE_SEARCH_LIMIT = 25;
 /** How many songs and albums to take from each chart. */
 export const APPLE_CHART_LIMIT = 25;
+/** The most playlist tracks AUX reads (Apple pages them 100 at a time). */
+export const APPLE_PLAYLIST_LIMIT = 300;
+const PLAYLIST_ID = /^pl\.(u-)?[A-Za-z0-9]{6,64}$/;
+const STOREFRONT = /^[a-z]{2}$/;
 
 export interface AppleMusicConfig {
   teamId: string;
@@ -103,17 +109,52 @@ export class AppleMusicClient {
     return this.only(await this.get<AmDataResponse<AmAlbum>>(`/albums/${encodeURIComponent(id)}`), id);
   }
 
+  /**
+   * A playlist's name and songs, following Apple's pages up to APPLE_PLAYLIST_LIMIT.
+   * `storefront` comes from the share link, so a playlist shared from another
+   * country is looked up in that country's catalog.
+   */
+  async playlist(
+    id: string,
+    storefront?: string,
+  ): Promise<{ name: string; songs: AmSong[]; truncated: boolean }> {
+    if (!PLAYLIST_ID.test(id)) throw new AppleMusicNotFoundError(`Not a playlist id: ${id}`);
+    const sf = storefront && STOREFRONT.test(storefront) ? storefront : undefined;
+    const body = await this.get<AmDataResponse<AmPlaylist>>(
+      `/playlists/${encodeURIComponent(id)}?include=tracks`,
+      sf,
+    );
+    const playlist = this.only(body, id);
+    const items = [...(playlist.relationships?.tracks?.data ?? [])];
+    let next = playlist.relationships?.tracks?.next;
+    while (next && items.length < APPLE_PLAYLIST_LIMIT) {
+      // `next` is a full API path (/v1/catalog/us/playlists/<id>/tracks?offset=100).
+      const rest = /\/v1\/catalog\/([a-z]{2})(\/playlists\/.*)$/.exec(next);
+      if (!rest) break;
+      const page = await this.get<AmTracksPage>(rest[2], rest[1]);
+      items.push(...(page.data ?? []));
+      next = page.next;
+    }
+    // Playlists can include music videos; AUX ranks songs.
+    const songs = items.filter((t): t is AmSong => t.type === 'songs').slice(0, APPLE_PLAYLIST_LIMIT);
+    return {
+      name: playlist.attributes?.name ?? 'Apple Music playlist',
+      songs,
+      truncated: !!next || items.length > APPLE_PLAYLIST_LIMIT,
+    };
+  }
+
   private only<T>(body: AmDataResponse<T>, id: string): T {
     const first = body.data?.[0];
     if (!first) throw new AppleMusicNotFoundError(`Not found: ${id}`);
     return first;
   }
 
-  private async get<T>(path: string): Promise<T> {
+  private async get<T>(path: string, storefront?: string): Promise<T> {
     if (!this.config) throw new AppleMusicUnavailableError('Apple Music is not set up on this server');
     let res: Response;
     try {
-      res = await fetch(`${BASE_URL}/catalog/${this.config.storefront}${path}`, {
+      res = await fetch(`${BASE_URL}/catalog/${storefront ?? this.config.storefront}${path}`, {
         headers: { Authorization: `Bearer ${this.developerToken()}` },
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });

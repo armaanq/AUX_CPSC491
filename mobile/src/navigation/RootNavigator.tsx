@@ -9,9 +9,10 @@ import {
 } from '../screens/AuthScreens';
 import { CompareScreen } from '../screens/CompareScreen';
 import { FriendProfileScreen } from '../screens/SocialScreens';
+import { ProfileScreen } from '../screens/ProfileScreen';
 import { useAuth } from '../state/AuthProvider';
 import { colors } from '../theme/theme';
-import { MusicDetailScreen } from '../screens/DiscoverScreens';
+import { MusicDetailScreen } from '../screens/MusicDetailScreen';
 import { MainTabs } from './MainTabs';
 import type { RootStackParamList } from './types';
 
@@ -53,6 +54,15 @@ export function RootNavigator() {
               name="Compare"
               component={CompareScreen}
               options={{ presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="Profile"
+              component={ProfileScreen}
+              options={{
+                headerShown: true,
+                headerTitle: '',
+                headerBackTitle: 'Back',
+              }}
             />
             <Stack.Screen
               name="FriendProfile"

@@ -96,7 +96,7 @@ describe('logging in', () => {
     expect(call(0).body).toEqual({ identifier: 'Armaan', password: 'longenough' });
     expect(await savedToken()).toBe('tok-1');
     expect(texts(r)).not.toContain('Log in to your');
-    expect(texts(r)).toContain('Charts');
+    expect(texts(r)).toContain('Hot 100');
 
     fetchMock.mockReturnValueOnce(reply(200, { results: [], usedFallback: false }));
     await searchSongs('ivy');
@@ -148,7 +148,7 @@ describe('signing up', () => {
       password: 'longenough',
     });
     expect(await savedToken()).toBe('tok-new');
-    expect(texts(r)).toContain('Charts');
+    expect(texts(r)).toContain('Hot 100');
   });
 
   it('shows why the server refused the signup', async () => {
@@ -171,7 +171,7 @@ describe('reopening the app', () => {
     const r = await launch();
     expect(call(0).url).toBe(`${API_BASE_URL}/me`);
     expect(call(0).auth).toBe('Bearer tok-saved');
-    expect(texts(r)).toContain('Charts');
+    expect(texts(r)).toContain('Hot 100');
   });
 
   it('forgets an expired session and goes back to login', async () => {
@@ -192,7 +192,7 @@ describe('reopening the app', () => {
 
     fetchMock.mockReturnValueOnce(reply(200, user));
     await press(r, 'Try again');
-    expect(texts(r)).toContain('Charts');
+    expect(texts(r)).toContain('Hot 100');
   });
 
   it('explains the wait while the shared server wakes up', async () => {
@@ -211,7 +211,7 @@ describe('reopening the app', () => {
 
       await act(async () => answer(new Response(JSON.stringify(user), { status: 200 })));
       await act(async () => {});
-      expect(texts(r)).toContain('Charts');
+      expect(texts(r)).toContain('Hot 100');
     } finally {
       jest.useRealTimers();
     }
@@ -222,7 +222,7 @@ it('logs out when the server rejects the session mid-use', async () => {
   await Keychain.setGenericPassword('armaan', 'tok-revoked', { service: SERVICE });
   fetchMock.mockReturnValueOnce(reply(200, user));
   const r = await launch();
-  expect(texts(r)).toContain('Charts');
+  expect(texts(r)).toContain('Hot 100');
 
   fetchMock.mockReturnValueOnce(reply(401, { message: 'Your session has expired.' }));
   await act(async () => {

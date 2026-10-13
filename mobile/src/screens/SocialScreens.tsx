@@ -23,121 +23,13 @@ import {
 } from '../components/Kit';
 const useNav = () =>
   useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-export function FriendsScreen() {
-  const nav = useNav();
-  const { state, connect } = usePrototype();
-  const { rankings: myRankings } = useRankings();
-  const [query, setQuery] = useState('');
-  const [tab, setTab] = useState('Friends');
-  const requests = Object.values(state.connections).filter(
-    s => s === 'incoming',
-  ).length;
-  const shown = people.filter(
-    p =>
-      p.name.toLowerCase().includes(query.toLowerCase().trim()) &&
-      (tab === 'Find people' ||
-        (tab === 'Friends'
-          ? state.connections[p.id] === 'friends'
-          : ['incoming', 'outgoing'].includes(state.connections[p.id]))),
-  );
-  return (
-    <Page>
-      <Text style={ui.label}>GOOD TASTE, GOOD COMPANY</Text>
-      <Text style={ui.title}>Your circle.</Text>
-      <Text style={ui.body}>Find your people through the music you love.</Text>
-      <Chips
-        values={['Friends', 'Requests', 'Find people']}
-        value={tab}
-        onChange={setTab}
-      />
-      {requests > 0 && (
-        <Text style={ui.label}>
-          {requests} incoming request{requests === 1 ? '' : 's'}
-        </Text>
-      )}
-      <TextInput
-        accessibilityLabel="Find people by username"
-        placeholder="Find a listener…"
-        placeholderTextColor={palette.muted}
-        value={query}
-        onChangeText={setQuery}
-        autoCapitalize="none"
-        style={ui.input}
-      />
-      {shown.map(p => {
-        const status = state.connections[p.id];
-        const match = tasteMatch(myRankings, p.rankings);
-        return (
-          <View key={p.id} style={ui.card}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => nav.navigate('FriendProfile', { friendId: p.id })}
-              style={ui.row}
-            >
-              <Avatar seed={p.id} name={p.name} size={48} />
-              <View style={{ flex: 1 }}>
-                <Text style={ui.musicTitle}>@{p.name}</Text>
-                <Text style={ui.body}>{p.genres.join(' · ')}</Text>
-              </View>
-              <Text style={[ui.link, { color: palette.green }]}>
-                {match.score === null ? 'New taste' : `${match.score}%`}
-              </Text>
-            </Pressable>
-            {status === 'incoming' ? (
-              <>
-                <Text style={ui.body}>Wants to be your friend</Text>
-                <Button
-                  title="Accept request"
-                  onPress={() => connect(p.id, 'accept')}
-                />
-                <Button
-                  secondary
-                  title="Decline"
-                  onPress={() => connect(p.id, 'remove')}
-                />
-              </>
-            ) : status === 'outgoing' ? (
-              <>
-                <Text style={ui.body}>
-                  Request sent · Waiting for acceptance
-                </Text>
-                <Button
-                  secondary
-                  title="Cancel request"
-                  onPress={() => connect(p.id, 'remove')}
-                />
-              </>
-            ) : status !== 'friends' ? (
-              <Button
-                title="Send friend request"
-                onPress={() => connect(p.id, 'request')}
-              />
-            ) : null}
-          </View>
-        );
-      })}
-      {!shown.length && (
-        <Empty
-          title={tab === 'Requests' ? 'All caught up' : 'No listeners here yet'}
-          body="Try Find people or search for another username."
-        />
-      )}
-      <Text style={[ui.body, { fontSize: 12 }]}>
-        Demo profiles · Requests stay on this device. Maya’s incoming request
-        lets you try the acceptance flow.
-      </Text>
-    </Page>
-  );
-}
-export function ProfileScreen() {
-  return <ProfileContent />;
-}
 export function FriendProfileScreen({
   route,
 }: NativeStackScreenProps<RootStackParamList, 'FriendProfile'>) {
   return <ProfileContent friendId={route.params.friendId} />;
 }
-function ProfileContent({ friendId }: { friendId?: string }) {
+/** Another listener's profile: taste match, their favorites and rankings. */
+function ProfileContent({ friendId }: { friendId: string }) {
   const nav = useNav();
   const { state, connect, setBio } = usePrototype();
   const { rankings: myRankings } = useRankings();

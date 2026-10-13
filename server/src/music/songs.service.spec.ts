@@ -429,3 +429,71 @@ describe('SongsService.resolve with Apple Music', () => {
     );
   });
 });
+
+describe('SongsService.importPlaylist', () => {
+  function importSetup() {
+    const { prisma, mb, apple } = setup({ appleMusic: true });
+    const playlistApple = Object.assign(apple, {
+      playlist: vi.fn().mockResolvedValue({ name: 'Blonde picks', songs: [amIvy, amNights, amIvyOnCompilation], truncated: false }),
+    });
+    const spotify = { playlist: vi.fn(), resolveShortLink: vi.fn() };
+    const service = new SongsService(
+      prisma as unknown as PrismaService,
+      mb as unknown as MusicBrainzClient,
+      playlistApple as unknown as AppleMusicClient,
+      spotify as never,
+    );
+    return { service, apple: playlistApple, spotify, prisma };
+  }
+
+  it('reads an Apple Music playlist through the API, in the link’s storefront', async () => {
+    const { service, apple } = importSetup();
+    const res = await service.importPlaylist('https://music.apple.com/gb/playlist/blonde-picks/pl.u-AbCdEf12345');
+    expect(apple.playlist).toHaveBeenCalledWith('pl.u-AbCdEf12345', 'gb');
+    expect(res.provider).toBe('apple');
+    expect(res.name).toBe('Blonde picks');
+    // The compilation copy of Ivy is the same recording, so it's listed once.
+    expect(res.tracks.map(t => t.title)).toEqual(['Ivy', 'Nights']);
+    expect(res.unmatched).toEqual([]);
+  });
+
+  it('matches a Spotify playlist song by song and reports what it couldn’t find', async () => {
+    const { service, spotify, apple } = importSetup();
+    spotify.playlist.mockResolvedValue({
+      name: 'Late night',
+      entries: [
+        { title: 'Ivy', artist: 'Frank Ocean' },
+        { title: 'A Song That Does Not Exist', artist: 'Nobody' },
+      ],
+    });
+    const res = await service.importPlaylist('https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=x');
+    expect(res.provider).toBe('spotify');
+    expect(res.tracks.map(t => [t.title, t.source])).toEqual([['Ivy', 'apple']]);
+    expect(res.unmatched).toEqual([{ title: 'A Song That Does Not Exist', artist: 'Nobody' }]);
+    expect(apple.search).toHaveBeenCalledWith('ivy frank ocean');
+  });
+
+  it('follows a spotify.link short link, and explains one that isn’t a playlist', async () => {
+    const { service, spotify } = importSetup();
+    spotify.resolveShortLink.mockResolvedValueOnce('37i9dQZF1DXcBWIGoYBM5M');
+    spotify.playlist.mockResolvedValue({ name: 'Mix', entries: [{ title: 'Ivy', artist: 'Frank Ocean' }] });
+    const res = await service.importPlaylist('https://spotify.link/AbCdEf1234');
+    expect(spotify.playlist).toHaveBeenCalledWith('37i9dQZF1DXcBWIGoYBM5M');
+    expect(res.tracks.map(t => t.title)).toEqual(['Ivy']);
+
+    spotify.resolveShortLink.mockResolvedValueOnce(null);
+    await expect(service.importPlaylist('https://spotify.link/SongLink1')).rejects.toThrow(BadRequestException);
+  });
+
+  it('explains bad links and private Spotify playlists', async () => {
+    const { service, spotify } = importSetup();
+    await expect(service.importPlaylist('https://music.apple.com/us/album/blonde/1146195596')).rejects.toThrow(
+      BadRequestException,
+    );
+    const { SpotifyPlaylistNotFoundError } = await import('./playlists/spotify-embed.js');
+    spotify.playlist.mockRejectedValue(new SpotifyPlaylistNotFoundError('private'));
+    await expect(service.importPlaylist('spotify:playlist:37i9dQZF1DXcBWIGoYBM5M')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+});

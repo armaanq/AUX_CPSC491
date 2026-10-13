@@ -102,14 +102,18 @@ export const ui = StyleSheet.create({
 export function Page({
   children,
   insetTop = true,
+  header,
 }: {
   children: React.ReactNode;
   insetTop?: boolean;
+  /** Stays put above the scrolling content (the tab bar header). */
+  header?: React.ReactNode;
 }) {
   const { error } = usePrototype();
   const rankingsError = useRankingsError();
   return (
     <SafeAreaView style={ui.page} edges={insetTop ? ['top'] : []}>
+      {header}
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={ui.content}
@@ -306,6 +310,79 @@ export function Empty({ title, body }: { title: string; body: string }) {
     <View style={ui.card}>
       <Text style={ui.heading}>{title}</Text>
       <Text style={ui.body}>{body}</Text>
+    </View>
+  );
+}
+
+/** A score in its sentiment colour: green for loved, amber for fine, red for disliked. */
+export function scoreTone(score: number): string {
+  if (score >= 6.67) return palette.green;
+  if (score >= 3.34) return '#A3741C';
+  return palette.accent;
+}
+
+/** A small labelled score, e.g. "YOU 8.40" or "AUX 7.12". Empty score shows a dash. */
+export function ScorePill({
+  label,
+  score,
+  strong = false,
+}: {
+  label: string;
+  score?: number | null;
+  strong?: boolean;
+}) {
+  const has = typeof score === 'number';
+  return (
+    <View
+      style={{
+        alignItems: 'flex-end',
+        minWidth: 52,
+      }}
+    >
+      <Text style={[ui.fine, { fontSize: 10, fontWeight: '800', letterSpacing: 1 }]}>
+        {label}
+      </Text>
+      <Text
+        style={{
+          fontSize: strong ? 20 : 16,
+          fontWeight: '800',
+          color: has ? scoreTone(score!) : palette.muted,
+          fontVariant: ['tabular-nums'],
+        }}
+      >
+        {has ? score!.toFixed(2) : '—'}
+      </Text>
+    </View>
+  );
+}
+
+/** Heading on the left, a small note or action on the right. */
+export function SectionHeader({
+  title,
+  note,
+  action,
+  onAction,
+}: {
+  title: string;
+  note?: string;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <View style={ui.between}>
+      <Text style={ui.heading}>{title}</Text>
+      {action && onAction ? (
+        <Pressable
+          accessibilityRole="button"
+          hitSlop={12}
+          onPress={onAction}
+          style={{ minHeight: 44, justifyContent: 'center' }}
+        >
+          <Text style={ui.link}>{action}</Text>
+        </Pressable>
+      ) : note ? (
+        <Text style={ui.body}>{note}</Text>
+      ) : null}
     </View>
   );
 }

@@ -1,1 +1,0 @@
-export { GlobalRankingsScreen } from './DiscoverScreens';

@@ -88,6 +88,8 @@ type API = {
   connect: (id: string, action: 'request' | 'accept' | 'remove') => void;
   /** Takes a song off the listening queue (e.g. once it's ranked). */
   unsave: (id: string) => void;
+  /** Adds songs to the end of the rank queue, skipping ones already there. */
+  enqueue: (ids: string[]) => void;
   setBio: (bio: string) => void;
 };
 const Context = createContext<API | null>(null);
@@ -184,6 +186,18 @@ export function PrototypeProvider({ children }: { children: React.ReactNode }) {
               ? { ...s, saved: s.saved.filter(x => x !== id) }
               : s,
           ),
+        enqueue: ids =>
+          setState(s => {
+            const fresh = ids.filter(
+              (id, i) => !s.saved.includes(id) && ids.indexOf(id) === i,
+            );
+            if (!fresh.length) return s;
+            return {
+              ...s,
+              library: fresh.reduce(remember, s.library),
+              saved: [...s.saved, ...fresh],
+            };
+          }),
         setBio: bio => setState(s => ({ ...s, bio })),
       }}
     >
