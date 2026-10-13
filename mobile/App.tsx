@@ -11,6 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Splash } from './src/components/Splash';
 import { AuthProvider } from './src/state/AuthProvider';
 import { PrototypeProvider } from './src/state/PrototypeProvider';
+import { PreviewProvider } from './src/state/PreviewProvider';
 import { RankingsProvider } from './src/state/RankingsProvider';
 import { RootNavigator } from './src/navigation/RootNavigator';
 
@@ -22,7 +23,9 @@ function App() {
       <AuthProvider>
         <RankingsProvider>
           <PrototypeProvider>
-            <RootNavigator />
+            <PreviewProvider>
+              <RootNavigator />
+            </PreviewProvider>
           </PrototypeProvider>
         </RankingsProvider>
       </AuthProvider>

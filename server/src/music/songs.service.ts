@@ -17,6 +17,7 @@ import {
   dedupeAppleSongs,
   mapAppleAlbum,
   mapAppleSong,
+  previewUrl,
   type MappedAppleSong,
 } from './apple/apple-music.mapping.js';
 import type { AmSong } from './apple/apple-music.types.js';
@@ -45,6 +46,8 @@ const HOUR = 60 * 60 * 1000;
 const MBID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const APPLE_ID = /^\d{1,20}$/;
 const GENRE_ID = /^\d{1,6}$/;
+/** CC-XXX-YY-NNNNN without dashes, e.g. USUM71607007. */
+const ISRC = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
 
 export interface SearchResponse {
   results: SearchResult[];
@@ -52,6 +55,11 @@ export interface SearchResponse {
   albums: AlbumResult[];
   /** True when no catalog could be reached and results came from AUX's own database. */
   usedFallback: boolean;
+}
+
+export interface PreviewResponse {
+  /** A 30-second clip to stream, or null when Apple Music has none for this song. */
+  url: string | null;
 }
 
 export interface AlbumResponse {
@@ -106,6 +114,8 @@ export class SongsService {
   private readonly appleAlbums = new TtlCache<AlbumResponse>(24 * HOUR, 500);
   /** genre id ("all" for everything) -> chart; Apple updates charts through the day */
   private readonly appleCharts = new TtlCache<AppleSearch>(HOUR, 100);
+  /** "apple:<id>" or "isrc:<isrc>" -> Apple's preview clip url (null: Apple has none) */
+  private readonly previews = new TtlCache<string | null>(24 * HOUR, 10_000);
   /** requests already waiting on a catalog, so identical ones share one call */
   private readonly inFlight = new Map<string, Promise<unknown>>();
 
@@ -282,6 +292,50 @@ export class SongsService {
       unmatched,
       truncated: parsed.entries.length > SPOTIFY_IMPORT_LIMIT,
     };
+  }
+
+  /**
+   * Apple Music's 30-second preview clip for a song. Apple songs are looked up
+   * by id; songs from other catalogs (MusicBrainz, Spotify imports) by ISRC.
+   * Only the clip's URL passes through AUX: the app streams the audio straight
+   * from Apple and nothing is downloaded or stored.
+   */
+  async preview(source: unknown, externalId: unknown, isrc: unknown): Promise<PreviewResponse> {
+    const appleId = source === 'apple' && typeof externalId === 'string' && APPLE_ID.test(externalId) ? externalId : null;
+    const code = typeof isrc === 'string' && ISRC.test(isrc.toUpperCase()) ? isrc.toUpperCase() : null;
+    if (!appleId && !code) {
+      throw new BadRequestException('Send source=apple with an Apple Music song id, or an isrc.');
+    }
+    if (!this.apple.enabled) return { url: null };
+
+    const key = appleId ? `apple:${appleId}` : `isrc:${code}`;
+    const cached = this.previews.get(key);
+    if (cached !== undefined) return { url: cached };
+    const known = appleId ? this.appleSongs.get(appleId) : undefined;
+    if (known) {
+      this.previews.set(key, known.previewUrl);
+      return { url: known.previewUrl };
+    }
+
+    try {
+      const url = await this.shared(`preview:${key}`, async () => {
+        const found = appleId
+          ? previewUrl(await this.apple.song(appleId))
+          : (await this.apple.songsByIsrc(code!)).map(previewUrl).find(u => u) ?? null;
+        this.previews.set(key, found);
+        return found;
+      });
+      return { url };
+    } catch (err) {
+      if (err instanceof AppleMusicNotFoundError) {
+        this.previews.set(key, null);
+        return { url: null };
+      }
+      if (err instanceof AppleMusicUnavailableError) {
+        throw new ServiceUnavailableException('Previews are unavailable right now. Try again in a moment.');
+      }
+      throw err;
+    }
   }
 
   /** Creates (or finds) the canonical AUX song for a catalog song. */

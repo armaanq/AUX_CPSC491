@@ -20,7 +20,6 @@ import { useRankings } from '../state/RankingsProvider';
 import { useSongStats } from '../state/useSongStats';
 import {
   Button,
-  Cover,
   Empty,
   MusicRow,
   Page,
@@ -28,6 +27,11 @@ import {
   scoreTone,
   ui,
 } from '../components/Kit';
+import {
+  PlayableCover,
+  PreviewCredit,
+  useStopPreviewOnBlur,
+} from '../components/PlayableCover';
 const useNav = () =>
   useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -89,6 +93,7 @@ export function MusicDetailScreen({
   const nav = useNav();
   const { state, toggleSaved, toggleFavorite } = usePrototype();
   const { rankings } = useRankings();
+  useStopPreviewOnBlur();
   const item = findMusic(route.params.musicId);
   if (!item)
     return (
@@ -110,11 +115,12 @@ export function MusicDetailScreen({
             ? `${item.kind} / ${SOURCE_NAMES[item.source]}`
             : `${item.kind} / ${item.genre}`}
         </Text>
-        <Cover item={item} size={230} />
+        <PlayableCover item={item} size={230} />
         <Text style={[ui.title, { textAlign: 'center', fontSize: 30 }]}>
           {item.title}
         </Text>
         <Text style={ui.body}>{item.artist}</Text>
+        <PreviewCredit items={[item]} />
       </View>
       {item.kind === 'song' && <YouVsAux item={item} yours={ranking?.score} />}
       <View style={ui.card}>

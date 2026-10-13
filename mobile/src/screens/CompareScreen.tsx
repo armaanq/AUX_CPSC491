@@ -17,6 +17,12 @@ import { usePrototype } from '../state/PrototypeProvider';
 import { useRankings } from '../state/RankingsProvider';
 import { chartGenreFor } from '../api/charts';
 import { Button, Cover, Empty, Page, palette, ui } from '../components/Kit';
+import {
+  PlayableCover,
+  PreviewCredit,
+  useStopPreviewOnBlur,
+} from '../components/PlayableCover';
+import { usePreview } from '../state/PreviewProvider';
 import { ScoreSlider } from '../components/ScoreSlider';
 type Props = NativeStackScreenProps<RootStackParamList, 'Compare'>;
 type Range = {
@@ -70,6 +76,9 @@ function RankFlow({ route, navigation }: Props) {
   const [history, setHistory] = useState<Range[]>([]);
   const [saved, setSaved] = useState(false);
   const committed = useRef(false);
+  // Leaving, or moving on to the next song, ends the preview.
+  useStopPreviewOnBlur();
+  const { stop: stopPreview } = usePreview();
   if (!item || item.kind !== 'song')
     return (
       <Page>
@@ -170,6 +179,7 @@ function RankFlow({ route, navigation }: Props) {
     setHistory([]);
   }
   function choose(newWins: boolean) {
+    stopPreview();
     if (!pivot) return;
     setHistory(h => [...h, range]);
     setRange(r => ({
@@ -241,12 +251,13 @@ function RankFlow({ route, navigation }: Props) {
         <>
           <Text style={ui.title}>{'First, how did\nit land?'}</Text>
           <View style={[ui.card, ui.row]}>
-            <Cover item={item} size={100} />
+            <PlayableCover item={item} size={100} />
             <View style={{ flex: 1, gap: 8 }}>
               <Text style={ui.heading}>{item.title}</Text>
               <Text style={ui.body}>{item.artist}</Text>
             </View>
           </View>
+          <PreviewCredit items={[item]} />
           <View style={ui.card}>
             <ScoreSlider value={score} onChange={setScore} />
           </View>
@@ -319,7 +330,7 @@ function RankFlow({ route, navigation }: Props) {
                   },
                 ]}
               >
-                <Cover item={m} size={100} />
+                <PlayableCover item={m} size={100} />
                 <View style={{ flex: 1, gap: 8 }}>
                   <Text style={ui.label}>
                     {index === 0
@@ -332,10 +343,12 @@ function RankFlow({ route, navigation }: Props) {
               </Pressable>
             </React.Fragment>
           ))}
+          <PreviewCredit items={[item, findMusic(pivot.musicId)].filter(m => !!m)} />
           <Button
             secondary
             title="Haven’t heard the other one · Skip"
             onPress={() => {
+              stopPreview();
               setHistory(h => [...h, range]);
               setRange(r => ({
                 ...r,
