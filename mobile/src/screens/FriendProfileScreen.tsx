@@ -1,1 +1,0 @@
-export { FriendProfileScreen } from './SocialScreens';

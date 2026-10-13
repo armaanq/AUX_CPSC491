@@ -61,3 +61,20 @@ export interface AmChartsResponse {
 export interface AmDataResponse<T> {
   data?: T[];
 }
+
+/** A catalog playlist (curated, or one a user shared with a pl.u- link). */
+export interface AmPlaylist {
+  id: string;
+  type: 'playlists';
+  attributes?: { name: string; curatorName?: string; url: string };
+  relationships?: {
+    /** The first page of tracks; `next` is the path to the following page. */
+    tracks?: { data: (AmSong | { id: string; type: string })[]; next?: string };
+  };
+}
+
+/** A page of a playlist's tracks. */
+export interface AmTracksPage {
+  data?: (AmSong | { id: string; type: string })[];
+  next?: string;
+}

@@ -17,10 +17,12 @@ import {
   insertRanking,
   musicFromSearch,
   registerMusic,
+  setSongId,
   type Ranking,
   type Sentiment,
 } from '../data/prototype';
 import { useAuth } from './AuthProvider';
+import { clearSongStatsCache } from './useSongStats';
 
 type API = {
   /** The logged-in user's rankings, best first. */
@@ -115,8 +117,11 @@ export function RankingsProvider({ children }: { children: React.ReactNode }) {
           if (!songId) {
             songId = (await resolveSong(source, externalId)).id;
             songIds.current.set(musicId, songId);
+            setSongId(musicId, songId);
           }
           adopt(userId, await placeRanking(songId, sentiment, index));
+          // Your new score changes this song's AUX average.
+          clearSongStatsCache(songId);
         } catch (err) {
           if (owner.current !== userId) return;
           // Put the list back the way the server has it.

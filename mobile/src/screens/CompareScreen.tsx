@@ -52,7 +52,7 @@ export function CompareScreen({
           title="Search in Discover"
           onPress={() => {
             navigation.goBack();
-            navigation.navigate('MainTabs', { screen: 'Search' });
+            navigation.navigate('MainTabs', { screen: 'Discover' });
           }}
         />
         <Button secondary title="Go back" onPress={() => navigation.goBack()} />
@@ -117,7 +117,7 @@ export function CompareScreen({
     <Page>
       <View style={ui.between}>
         <Text style={ui.label}>
-          {saved ? 'IN YOUR COLLECTION' : 'RANK A SONG'}
+          {saved ? 'IN YOUR LIBRARY' : 'RANK A SONG'}
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -137,13 +137,21 @@ export function CompareScreen({
             <Text style={[ui.title, { fontSize: 64, color: palette.green }]}>
               {rankings.find(r => r.musicId === item.id)?.score.toFixed(2)}
             </Text>
-            <Text style={ui.body}>#{overallRank} in your songs</Text>
+            <Text style={ui.body}>#{overallRank} in your library</Text>
           </View>
           <Button
-            title="See your collection"
+            title="See your library"
             onPress={() => {
               navigation.goBack();
-              navigation.navigate('MainTabs', { screen: 'Profile' });
+              navigation.navigate('MainTabs', { screen: 'Library' });
+            }}
+          />
+          <Button
+            secondary
+            title="Rank the next one"
+            onPress={() => {
+              navigation.goBack();
+              navigation.navigate('MainTabs', { screen: 'Rank' });
             }}
           />
         </>
@@ -183,7 +191,7 @@ export function CompareScreen({
             <Text style={[ui.title, { color: palette.green }]}>
               {preview?.score.toFixed(2)}
             </Text>
-            <Text style={ui.body}>#{overallRank} in your songs</Text>
+            <Text style={ui.body}>#{overallRank} in your library</Text>
           </View>
           <Text style={ui.body}>
             {list.length

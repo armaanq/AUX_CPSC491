@@ -188,6 +188,74 @@ describe('RankingsService.community', () => {
     const { service } = communitySetup([], []);
     await expect(service.community()).resolves.toEqual({ entries: [] });
   });
+
+  it('filters to one genre family and takes up to 100 (the Hot 100)', async () => {
+    const { service, prisma } = communitySetup([], []);
+    await service.community({ genre: 'hip-hop', limit: '100' });
+    const args = prisma.ranking.groupBy.mock.calls[0][0];
+    expect(args.take).toBe(100);
+    expect(args.where.song.OR).toContainEqual({
+      genre: { equals: 'Hip-Hop/Rap', mode: 'insensitive' },
+    });
+  });
+
+  it('keeps the 50-song default and treats "all" as no filter', async () => {
+    const { service, prisma } = communitySetup([], []);
+    await service.community({ genre: 'all' });
+    const args = prisma.ranking.groupBy.mock.calls[0][0];
+    expect(args.take).toBe(50);
+    expect(args.where).toBeUndefined();
+  });
+
+  it('rejects unknown genres and out-of-range limits', async () => {
+    const { service } = communitySetup([], []);
+    await expect(service.community({ genre: 'polka' })).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.community({ limit: '500' })).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.community({ limit: 'ten' })).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+});
+
+describe('RankingsService.songStats', () => {
+  function statsSetup() {
+    const prisma = {
+      ranking: {
+        groupBy: vi.fn().mockResolvedValue([
+          { songId: SONG(1), _avg: { score: 7.456 }, _count: { songId: 4 } },
+        ]),
+      },
+    };
+    return {
+      service: new RankingsService(prisma as unknown as PrismaService),
+      prisma,
+    };
+  }
+
+  it('returns each ranked song’s average and listener count, skipping duplicates', async () => {
+    const { service, prisma } = statsSetup();
+    await expect(
+      service.songStats(`${SONG(1)},${SONG(2)},${SONG(1)}`),
+    ).resolves.toEqual({
+      stats: [{ songId: SONG(1), listeners: 4, averageScore: 7.46 }],
+    });
+    expect(prisma.ranking.groupBy.mock.calls[0][0].where).toEqual({
+      songId: { in: [SONG(1), SONG(2)] },
+    });
+  });
+
+  it('answers an empty request without a query, and rejects bad ids', async () => {
+    const { service, prisma } = statsSetup();
+    await expect(service.songStats(undefined)).resolves.toEqual({ stats: [] });
+    expect(prisma.ranking.groupBy).not.toHaveBeenCalled();
+    await expect(service.songStats('not-a-uuid')).rejects.toThrow(
+      BadRequestException,
+    );
+  });
 });
 
 describe('RankingsService.remove', () => {

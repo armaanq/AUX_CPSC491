@@ -83,3 +83,17 @@ test('leftover data from older app versions is cleared', async () => {
   expect(await AsyncStorage.getItem('@aux/prototype/v3')).toBeNull();
   await act(async () => renderer.unmount());
 });
+test('enqueue adds songs to the end of the rank queue once each', async () => {
+  const renderer = await mount();
+  await act(async () => {
+    current.enqueue(['t5', 'a0', 't6', 't5']);
+  });
+  // a0 was already queued; t5 is listed twice but added once.
+  expect(current.state.saved).toEqual(['a0', 'a3', 't5', 't6']);
+  const before = current.state;
+  await act(async () => {
+    current.enqueue(['t5']);
+  });
+  expect(current.state).toBe(before);
+  await act(async () => renderer.unmount());
+});

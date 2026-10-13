@@ -60,6 +60,38 @@ export interface CommunityChartResponse {
 }
 
 const COMMUNITY_CHART_SIZE = 50;
+/** The Hot 100 is the longest chart the app asks for. */
+const COMMUNITY_CHART_MAX = 100;
+/** The most songs one stats request can ask about (a page of search results). */
+const STATS_MAX_IDS = 60;
+
+/**
+ * Genre filters for the AUX chart. Song.genre holds the catalog's own genre
+ * name (Apple Music's main genre, e.g. "Hip-Hop/Rap"), so each filter lists
+ * the names that belong to it. Keys mirror mobile/src/api/charts.ts.
+ */
+export const COMMUNITY_GENRES: Record<string, readonly string[]> = {
+  pop: ['Pop', 'Pop/Rock', 'Pop in Spanish'],
+  'hip-hop': ['Hip-Hop/Rap', 'Hip-Hop', 'Rap', 'Hardcore Rap', 'West Coast Rap', 'Underground Rap'],
+  rnb: ['R&B/Soul', 'R&B', 'Soul', 'Contemporary R&B', 'Neo-Soul'],
+  alternative: ['Alternative', 'Indie Rock', 'Indie Pop', 'Alternative Rap'],
+  rock: ['Rock', 'Hard Rock', 'Metal', 'Punk'],
+  country: ['Country', 'Contemporary Country'],
+  latin: ['Latin', 'Urbano latino', 'Latin Urban', 'Reggaeton', 'Música Mexicana', 'Pop Latino'],
+  dance: ['Dance', 'Electronic', 'House', 'Techno'],
+  'k-pop': ['K-Pop'],
+};
+
+export interface CommunityQuery {
+  genre?: unknown;
+  limit?: unknown;
+}
+
+export interface SongStats {
+  songId: string;
+  listeners: number;
+  averageScore: number;
+}
 
 export interface PlaceBody {
   sentiment?: unknown;
@@ -129,13 +161,41 @@ export class RankingsService {
   }
 
   /** Every AUX user's rankings combined into one chart. No usernames, just totals. */
-  async community(): Promise<CommunityChartResponse> {
+  async community(query: CommunityQuery = {}): Promise<CommunityChartResponse> {
+    const { genre, limit } = query;
+    let names: readonly string[] | undefined;
+    if (genre !== undefined && genre !== '' && genre !== 'all') {
+      names = typeof genre === 'string' ? COMMUNITY_GENRES[genre] : undefined;
+      if (!names) {
+        throw new BadRequestException(
+          `genre must be one of: ${Object.keys(COMMUNITY_GENRES).join(', ')}`,
+        );
+      }
+    }
+    let take = COMMUNITY_CHART_SIZE;
+    if (limit !== undefined && limit !== '') {
+      take = Number(limit);
+      if (!Number.isInteger(take) || take < 1 || take > COMMUNITY_CHART_MAX) {
+        throw new BadRequestException(
+          `limit must be a whole number from 1 to ${COMMUNITY_CHART_MAX}`,
+        );
+      }
+    }
     const groups = await this.prisma.ranking.groupBy({
       by: ['songId'],
+      where: names
+        ? {
+            song: {
+              OR: names.map((name) => ({
+                genre: { equals: name, mode: 'insensitive' as const },
+              })),
+            },
+          }
+        : undefined,
       _avg: { score: true },
       _count: { songId: true },
       orderBy: [{ _avg: { score: 'desc' } }, { _count: { songId: 'desc' } }],
-      take: COMMUNITY_CHART_SIZE,
+      take,
     });
     const songs = await this.prisma.song.findMany({
       where: { id: { in: groups.map((g) => g.songId) } },
@@ -155,6 +215,35 @@ export class RankingsService {
           },
         ];
       }),
+    };
+  }
+
+  /**
+   * How AUX ranks each of these songs overall. Songs nobody has ranked are
+   * left out. Used to show "you vs. everyone" next to search results.
+   */
+  async songStats(rawIds: unknown): Promise<{ stats: SongStats[] }> {
+    const ids =
+      typeof rawIds === 'string'
+        ? [...new Set(rawIds.split(',').map((id) => id.trim()).filter(Boolean))]
+        : [];
+    if (!ids.length) return { stats: [] };
+    if (ids.length > STATS_MAX_IDS) {
+      throw new BadRequestException(`ask about at most ${STATS_MAX_IDS} songs at once`);
+    }
+    ids.forEach(checkSongId);
+    const groups = await this.prisma.ranking.groupBy({
+      by: ['songId'],
+      where: { songId: { in: ids } },
+      _avg: { score: true },
+      _count: { songId: true },
+    });
+    return {
+      stats: groups.map((g) => ({
+        songId: g.songId,
+        listeners: g._count.songId,
+        averageScore: Math.round((g._avg.score ?? 0) * 100) / 100,
+      })),
     };
   }
 

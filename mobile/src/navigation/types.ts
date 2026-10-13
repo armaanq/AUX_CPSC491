@@ -1,11 +1,12 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
 export type MainTabParamList = {
-  Home: undefined;
-  Search: undefined;
-  Global: undefined;
-  Friends: undefined;
-  Profile: undefined;
+  Hot100: undefined;
+  /** `query` pre-fills the search (e.g. a playlist song AUX couldn't match). */
+  Discover: { query?: string } | undefined;
+  Rank: undefined;
+  Library: undefined;
+  Add: undefined;
 };
 
 export type RootStackParamList = {
@@ -15,4 +16,5 @@ export type RootStackParamList = {
   Compare: { musicId: string };
   MusicDetail: { musicId: string };
   FriendProfile: { friendId: string };
+  Profile: undefined;
 };
