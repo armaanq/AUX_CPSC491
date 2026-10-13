@@ -6,28 +6,67 @@ import {
   bandOf,
   findMusic,
   insertRanking,
-  SENTIMENT_BANDS,
+  isRankable,
   SENTIMENT_LABELS,
   SENTIMENT_ORDER,
+  sentimentForScore,
   type Ranking,
   type Sentiment,
 } from '../data/prototype';
 import { usePrototype } from '../state/PrototypeProvider';
 import { useRankings } from '../state/RankingsProvider';
+import { chartGenreFor } from '../api/charts';
 import { Button, Cover, Empty, Page, palette, ui } from '../components/Kit';
-type Range = { lo: number; hi: number; excluded: string[] };
-export function CompareScreen({
-  route,
-  navigation,
-}: NativeStackScreenProps<RootStackParamList, 'Compare'>) {
-  const { unsave } = usePrototype();
+import { ScoreSlider } from '../components/ScoreSlider';
+type Props = NativeStackScreenProps<RootStackParamList, 'Compare'>;
+type Range = {
+  lo: number;
+  hi: number;
+  excluded: string[];
+  /** Head-to-head picks made so far; skips don't count. */
+  asked: number;
+};
+/** Where the slider starts before you move it. */
+const START_SCORE = 5;
+/** Where in `songs` the one you scored closest to `score` is. */
+function closestIndex(songs: Ranking[], score: number) {
+  return songs.reduce(
+    (best, r, i) =>
+      Math.abs(r.score - score) < Math.abs(songs[best].score - score)
+        ? i
+        : best,
+    0,
+  );
+}
+/**
+ * Genres that count as the same when comparing: chart genres group related
+ * names ("Rap" with "Hip-Hop/Rap", "House" with "Dance"); any other genre
+ * only matches itself. Undefined when the genre isn't known.
+ */
+function genreKey(genre: string | undefined) {
+  const name = genre?.trim();
+  if (!name || name === 'Other') return undefined;
+  return chartGenreFor(name) ?? name.toLowerCase();
+}
+/** Each song gets a fresh flow, so "Rank the next one" starts from the slider. */
+export function CompareScreen(props: Props) {
+  return <RankFlow key={props.route.params.musicId} {...props} />;
+}
+function RankFlow({ route, navigation }: Props) {
+  const { state, unsave } = usePrototype();
   const { rankings, rank, loading } = useRankings();
   const item = findMusic(route.params.musicId);
   // Snapshot of the user's other songs, taken when comparing starts so the list
   // doesn't shift under them mid-comparison. Already ordered best-first.
   const [others, setOthers] = useState<Ranking[]>([]);
+  const [score, setScore] = useState(START_SCORE);
   const [sentiment, setSentiment] = useState<Sentiment | null>(null);
-  const [range, setRange] = useState<Range>({ lo: 0, hi: 0, excluded: [] });
+  const [range, setRange] = useState<Range>({
+    lo: 0,
+    hi: 0,
+    excluded: [],
+    asked: 0,
+  });
   const [history, setHistory] = useState<Range[]>([]);
   const [saved, setSaved] = useState(false);
   const committed = useRef(false);
@@ -75,44 +114,78 @@ export function CompareScreen({
           SENTIMENT_ORDER.indexOf(sentiment),
       ).length
     : 0;
-  const overallRank = aboveBand + range.lo + 1;
-  const candidates = list
+  // Only songs in the same genre are asked about, so you never weigh a rap
+  // song against a house track. A song with no known genre is compared
+  // against everything.
+  const genre = genreKey(item.genre);
+  const peers = list
     .map((r, index) => ({ ...r, index }))
-    .filter(
-      r =>
-        r.index >= range.lo &&
-        r.index < range.hi &&
-        !range.excluded.includes(r.musicId),
-    );
-  const middle = Math.floor((range.lo + range.hi) / 2);
-  const sameGenre = candidates.filter(
-    r => findMusic(r.musicId).genre === item.genre,
-  );
-  const pivot = (sameGenre.length ? sameGenre : candidates).sort(
-    (a, b) => Math.abs(a.index - middle) - Math.abs(b.index - middle),
-  )[0];
-  const done = !!sentiment && range.lo >= range.hi;
-  const stalled = !!sentiment && !done && !pivot;
+    .filter(r => !genre || genreKey(findMusic(r.musicId)?.genre) === genre);
+  // Peers that could still be on either side of the new song, best first.
+  const open = peers.filter(r => r.index >= range.lo && r.index < range.hi);
+  // Start against the peer you scored closest to. While the new song keeps
+  // winning (or losing), jump further each time: 1, 2, 4… songs. Once it has
+  // both won and lost, its spot is boxed in, so split the difference.
+  const won = range.hi < list.length;
+  const lost = range.lo > 0;
+  const jump = 2 ** Math.max(0, range.asked - 1);
+  const target =
+    won && lost
+      ? Math.floor((open.length - 1) / 2)
+      : won
+      ? open.length - jump
+      : lost
+      ? jump - 1
+      : closestIndex(open, score);
+  const pivot = open
+    .map((r, i) => ({ ...r, distance: Math.abs(i - target) }))
+    .filter(r => !range.excluded.includes(r.musicId))
+    .sort((a, b) => a.distance - b.distance)[0];
+  // With no peer left to ask about, your slider score places it among the
+  // songs from other genres that are still in range.
+  const done = !!sentiment && !pivot;
+  const position =
+    range.lo +
+    list.slice(range.lo, range.hi).filter(r => r.score > score).length;
+  const overallRank = aboveBand + position + 1;
   const preview = sentiment
-    ? insertRanking(rankings, item.id, sentiment, range.lo).find(
+    ? insertRanking(rankings, item.id, sentiment, position).find(
         r => r.musicId === item.id,
       )
     : undefined;
-  function react(choice: Sentiment) {
+  const upNext = state.saved
+    .map(findMusic)
+    .find(m => isRankable(m) && m.id !== item.id);
+  function react() {
+    const choice = sentimentForScore(score);
     const snapshot = rankings.filter(r => r.musicId !== item!.id);
     setOthers(snapshot);
     setSentiment(choice);
-    setRange({ lo: 0, hi: bandOf(snapshot, choice).length, excluded: [] });
+    setRange({
+      lo: 0,
+      hi: bandOf(snapshot, choice).length,
+      excluded: [],
+      asked: 0,
+    });
     setHistory([]);
   }
   function choose(newWins: boolean) {
     if (!pivot) return;
     setHistory(h => [...h, range]);
-    setRange(r =>
-      newWins ? { ...r, hi: pivot.index } : { ...r, lo: pivot.index + 1 },
-    );
+    setRange(r => ({
+      ...r,
+      asked: r.asked + 1,
+      ...(newWins ? { hi: pivot.index } : { lo: pivot.index + 1 }),
+    }));
   }
   const bandName = sentiment ? SENTIMENT_LABELS[sentiment].toLowerCase() : '';
+  const slid = score.toFixed(1);
+  const makeRoom =
+    'Scores across that range shift to make room, so a few may move slightly.';
+  const seeLibrary = () => {
+    navigation.goBack();
+    navigation.navigate('MainTabs', { screen: 'Library' });
+  };
   return (
     <Page>
       <View style={ui.between}>
@@ -139,21 +212,30 @@ export function CompareScreen({
             </Text>
             <Text style={ui.body}>#{overallRank} in your library</Text>
           </View>
-          <Button
-            title="See your library"
-            onPress={() => {
-              navigation.goBack();
-              navigation.navigate('MainTabs', { screen: 'Library' });
-            }}
-          />
-          <Button
-            secondary
-            title="Rank the next one"
-            onPress={() => {
-              navigation.goBack();
-              navigation.navigate('MainTabs', { screen: 'Rank' });
-            }}
-          />
+          {upNext ? (
+            <>
+              <Button
+                title="Rank the next one"
+                onPress={() => navigation.setParams({ musicId: upNext.id })}
+              />
+              <Text style={[ui.fine, { textAlign: 'center' }]}>
+                Up next: {upNext.title} · {upNext.artist}
+              </Text>
+              <Button secondary title="See your library" onPress={seeLibrary} />
+            </>
+          ) : (
+            <>
+              <Button title="See your library" onPress={seeLibrary} />
+              <Button
+                secondary
+                title="Find more to rank"
+                onPress={() => {
+                  navigation.goBack();
+                  navigation.navigate('MainTabs', { screen: 'Rank' });
+                }}
+              />
+            </>
+          )}
         </>
       ) : !sentiment ? (
         <>
@@ -165,20 +247,15 @@ export function CompareScreen({
               <Text style={ui.body}>{item.artist}</Text>
             </View>
           </View>
+          <View style={ui.card}>
+            <ScoreSlider value={score} onChange={setScore} />
+          </View>
           <Text style={ui.body}>
-            Your reaction sets the range. A few head-to-head choices then find
-            its exact spot.
+            Slide to score it. Then a few head-to-head picks against
+            {genre ? ` other ${item.genre}` : ''} songs you scored about the
+            same find its exact spot.
           </Text>
-          {SENTIMENT_ORDER.map(s => (
-            <Button
-              key={s}
-              secondary={s !== 'LOVED'}
-              title={`${SENTIMENT_LABELS[s]} · ${SENTIMENT_BANDS[s].min.toFixed(
-                2,
-              )}–${SENTIMENT_BANDS[s].max.toFixed(2)}`}
-              onPress={() => react(s)}
-            />
-          ))}
+          <Button title="Continue" onPress={react} />
         </>
       ) : done ? (
         <>
@@ -194,33 +271,22 @@ export function CompareScreen({
             <Text style={ui.body}>#{overallRank} in your library</Text>
           </View>
           <Text style={ui.body}>
-            {list.length
-              ? `Scores across your “${bandName}” songs shift to make room, so a few of them may move slightly.`
-              : `It’s your first “${bandName}” song, so it starts at the top of that range. Scores spread out as you add more.`}
+            {!list.length
+              ? `You slid it to ${slid}. It’s your first “${bandName}” song, so it starts at the top of that range. Scores spread out as you add more.`
+              : !genre
+              ? `You slid it to ${slid}; where it landed among your “${bandName}” songs sets its score. ${makeRoom}`
+              : !peers.length
+              ? `None of your “${bandName}” songs are ${item.genre} yet, so your ${slid} placed it. ${makeRoom}`
+              : `You slid it to ${slid}. Your picks against your other ${item.genre} songs set its spot, and your score placed it among other genres. ${makeRoom}`}
           </Text>
           <Button
             title="Save to my rankings"
             onPress={() => {
               if (committed.current) return;
               committed.current = true;
-              rank(item.id, sentiment, range.lo);
+              rank(item.id, sentiment, position);
               unsave(item.id);
               setSaved(true);
-            }}
-          />
-        </>
-      ) : stalled ? (
-        <>
-          <Text style={ui.title}>More listening, less guessing.</Text>
-          <Text style={ui.body}>
-            You skipped the remaining comparisons. Listen to more of your
-            collection and come back to rank this one.
-          </Text>
-          <Button
-            title="Start comparisons over"
-            onPress={() => {
-              setRange({ lo: 0, hi: list.length, excluded: [] });
-              setHistory([]);
             }}
           />
         </>
@@ -232,10 +298,8 @@ export function CompareScreen({
             {bandName}” songs.
           </Text>
           <Text style={ui.label}>
-            CHOICE {history.length + 1} ·{' '}
-            {findMusic(pivot.musicId).genre === item.genre
-              ? item.genre
-              : 'EXPLORING YOUR OTHER GENRES'}
+            CHOICE {history.length + 1}
+            {genre ? ` · ${item.genre}` : ''}
           </Text>
           {[item, findMusic(pivot.musicId)].map((m, index) => (
             <React.Fragment key={m.id}>
@@ -258,7 +322,9 @@ export function CompareScreen({
                 <Cover item={m} size={100} />
                 <View style={{ flex: 1, gap: 8 }}>
                   <Text style={ui.label}>
-                    {index === 0 ? 'YOUR NEW PICK' : 'FROM YOUR LIST'}
+                    {index === 0
+                      ? `YOUR NEW PICK · ${score.toFixed(1)}`
+                      : `FROM YOUR LIST · ${pivot.score.toFixed(2)}`}
                   </Text>
                   <Text style={ui.heading}>{m.title}</Text>
                   <Text style={ui.body}>{m.artist}</Text>
@@ -292,7 +358,7 @@ export function CompareScreen({
       {!saved && sentiment && history.length === 0 && (
         <Button
           secondary
-          title="Change my reaction"
+          title="Change my score"
           onPress={() => setSentiment(null)}
         />
       )}

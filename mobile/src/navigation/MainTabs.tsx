@@ -92,15 +92,16 @@ export function MainTabs() {
           tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
         }}
       >
-        <Tab.Screen
-          name="Hot100"
-          component={Hot100Screen}
-          options={{ tabBarIcon: Hot100Icon, title: 'Hot 100' }}
-        />
+        {/* The first tab is where the app opens. */}
         <Tab.Screen
           name="Discover"
           component={DiscoverScreen}
           options={{ tabBarIcon: DiscoverIcon }}
+        />
+        <Tab.Screen
+          name="Hot100"
+          component={Hot100Screen}
+          options={{ tabBarIcon: Hot100Icon, title: 'Hot 100' }}
         />
         <Tab.Screen
           name="Rank"

@@ -5,16 +5,13 @@ import { Pressable, Text, View } from 'react-native';
 import { CHART_GENRES, chartGenreFor } from '../api/charts';
 import { Button, Cover, Empty, Page, SectionHeader, palette, ui } from '../components/Kit';
 import { TopBar } from '../components/TopBar';
-import { findMusic, type Music } from '../data/prototype';
+import { findMusic, isRankable as rankable, type Music } from '../data/prototype';
 import type { RootStackParamList } from '../navigation/types';
 import { usePrototype } from '../state/PrototypeProvider';
 import { useRankings } from '../state/RankingsProvider';
 import { useCharts } from '../state/useCharts';
 
 const SUGGESTIONS = 10;
-
-/** Only real catalog songs can be ranked; albums and built-in samples can't. */
-const rankable = (m: Music | undefined) => !!m && m.kind === 'song' && !!m.source;
 
 /**
  * The genres you love most, best first: each ranked song counts for its
