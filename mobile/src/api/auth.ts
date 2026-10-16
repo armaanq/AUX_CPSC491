@@ -8,6 +8,8 @@ export type User = {
   bio: string;
   avatarUrl: string | null;
   favoriteGenres: string[];
+  /** When first-run setup (importing a playlist) was finished; null until then. */
+  onboardedAt: string | null;
   createdAt: string;
 };
 
@@ -30,4 +32,17 @@ export function login(identifier: string, password: string) {
 
 export function getMe() {
   return request<User>('/me');
+}
+
+/** Edits what other people see on your profile. */
+export function updateProfile(changes: { bio: string }) {
+  return request<User>('/me', {
+    method: 'PATCH',
+    body: JSON.stringify(changes),
+  });
+}
+
+/** Marks first-run setup done. Safe to repeat. */
+export function completeOnboarding() {
+  return request<User>('/me/onboarded', { method: 'POST' });
 }

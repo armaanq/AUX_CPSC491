@@ -1,6 +1,5 @@
 import { catalog as tracks, myRankings } from './mockMusic';
 import artwork from './artwork.json';
-import { friends } from './mockFriends';
 import type { AlbumResult, CatalogSource, SearchResult } from '../api/songs';
 export type MusicKind = 'song' | 'album';
 export type Music = {
@@ -78,13 +77,6 @@ function fromSampleScores(list: { musicId: string; score: number }[]) {
       })),
   );
 }
-export type Person = {
-  id: string;
-  name: string;
-  bio: string;
-  genres: string[];
-  rankings: Ranking[];
-};
 const genres = [
   'Pop',
   'Soul',
@@ -197,51 +189,6 @@ export function isCatalogMusic(value: unknown): value is Music {
     typeof m.externalId === 'string'
   );
 }
-export const people: Person[] = [
-  ...friends.map(f => ({
-    id: f.id,
-    name: f.username,
-    bio:
-      f.username === 'shyan'
-        ? 'Always looking for the next no-skip album.'
-        : 'Late-night listening. Strong opinions.',
-    genres: ['R&B', 'Hip-hop'],
-    rankings: fromSampleScores(
-      f.rankings.map(t => ({ musicId: t.id, score: t.score })),
-    ),
-  })),
-  {
-    id: 'u-maya',
-    name: 'maya',
-    bio: 'Soul records and Sunday mornings.',
-    genres: ['Soul', 'R&B'],
-    rankings: fromSampleScores([
-      { musicId: 't2', score: 9.4 },
-      { musicId: 't12', score: 9.1 },
-      { musicId: 't4', score: 8.8 },
-    ]),
-  },
-  {
-    id: 'u-jordan',
-    name: 'jordan',
-    bio: 'One more album before bed.',
-    genres: ['Pop', 'Hip-hop'],
-    rankings: fromSampleScores([
-      { musicId: 't1', score: 9.3 },
-      { musicId: 't6', score: 8.2 },
-    ]),
-  },
-  {
-    id: 'u-devon',
-    name: 'devon',
-    bio: 'Here for the deep cuts.',
-    genres: ['R&B', 'Soul'],
-    rankings: fromSampleScores([
-      { musicId: 't7', score: 9.8 },
-      { musicId: 't11', score: 9.2 },
-    ]),
-  },
-];
 export const initialRankings: Ranking[] = fromSampleScores(
   myRankings.map(t => ({ musicId: t.id, score: t.score })),
 );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { Alert, Text } from 'react-native';
 import TestRenderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
@@ -169,8 +169,8 @@ describe('Hot 100', () => {
       '/me/rankings': () => ({ rankings: [ranked(texas, ID(2), 'LOVED', 0, 10)] }),
       '/charts/community?limit=100': () => ({
         entries: [
-          { song: { ...eclipse, id: ID(1) }, listeners: 3, averageScore: 9.44 },
-          { song: { ...texas, id: ID(2) }, listeners: 1, averageScore: 8.34 },
+          { song: { ...eclipse, id: ID(1) }, listeners: 3, averageScore: 9.44, chartScore: 8.12 },
+          { song: { ...texas, id: ID(2) }, listeners: 1, averageScore: 8.34, chartScore: 7.11 },
         ],
       }),
     });
@@ -185,10 +185,10 @@ describe('Hot 100', () => {
       '/me': () => user,
       '/me/rankings': () => ({ rankings: [] }),
       '/charts/community?limit=100': () => ({
-        entries: [{ song: { ...eclipse, id: ID(1) }, listeners: 3, averageScore: 9.44 }],
+        entries: [{ song: { ...eclipse, id: ID(1) }, listeners: 3, averageScore: 9.44, chartScore: 8.12 }],
       }),
       '/charts/community?genre=hip-hop&limit=100': () => ({
-        entries: [{ song: { ...janice, id: ID(3) }, listeners: 2, averageScore: 8.1 }],
+        entries: [{ song: { ...janice, id: ID(3) }, listeners: 2, averageScore: 8.1, chartScore: 7.32 }],
       }),
     });
     const r = await show(<Hot100Screen />);
@@ -234,6 +234,29 @@ describe('Discover', () => {
     expect(t.indexOf('Choosin’ Texas')).toBeLessThan(t.indexOf('Solar Eclipse'));
     expect(t).toContain('Trending on Apple Music');
     expect(t).toContain('Janice STFU');
+  });
+
+  it('shows your top 3 hottest takes, with the rest a tap away', async () => {
+    const takes = [1, 2, 3, 4, 5].map(n => song(`50${n}`, `Take ${n}`, 'Artist'));
+    serve({
+      '/me': () => user,
+      // Scores 10 down to 6 against an AUX average of 5: Take 1 is the hottest.
+      '/me/rankings': () => ({
+        rankings: takes.map((t, i) => ranked(t, ID(10 + i), 'LOVED', i, 10 - i)),
+      }),
+      '/charts': () => ({ songs: [], albums: [] }),
+      [`/charts/community/songs?ids=${takes.map((_, i) => ID(10 + i)).join(',')}`]: () => ({
+        stats: takes.map((_, i) => ({ songId: ID(10 + i), listeners: 3, averageScore: 5 })),
+      }),
+    });
+    const r = await show(<DiscoverScreen />);
+    await act(async () => {});
+    expect(texts(r)).toContain('Take 3');
+    expect(texts(r)).not.toContain('Take 4');
+    await choose(r, 'Show 2 more');
+    expect(texts(r)).toContain('Take 5');
+    await choose(r, 'Show less');
+    expect(texts(r)).not.toContain('Take 4');
   });
 
   it('shows your score and AUX’s next to search results', async () => {
@@ -330,6 +353,41 @@ describe('Library', () => {
   });
 });
 
+describe('Library: removing songs', () => {
+  it('takes out a song you select, once you confirm', async () => {
+    const alert = jest
+      .spyOn(Alert, 'alert')
+      .mockImplementation((_title, _message, buttons) =>
+        buttons?.find(b => b.style === 'destructive')?.onPress?.(),
+      );
+    serve({
+      '/me': () => user,
+      '/me/rankings': () => ({
+        rankings: [ranked(eclipse, ID(1), 'LOVED', 0, 10), ranked(texas, ID(2), 'LOVED', 1, 8.34)],
+      }),
+      [`/me/rankings/${ID(1)}`]: () => ({ rankings: [ranked(texas, ID(2), 'LOVED', 0, 10)] }),
+    });
+    const r = await show(<LibraryScreen />);
+    expect(r.root.findAll(n => n.props.accessibilityLabel === 'Remove Solar Eclipse from your rankings')).toHaveLength(0);
+    await choose(r, 'Select');
+    const remove = r.root
+      .findAll(n => typeof n.props.onPress === 'function')
+      .find(n => n.props.accessibilityLabel === 'Remove Solar Eclipse from your rankings')!;
+    await act(async () => remove.props.onPress());
+    await act(async () => {});
+    expect(alert).toHaveBeenCalledWith('Remove from your rankings?', expect.any(String), expect.any(Array));
+    const deleted = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).endsWith(`/me/rankings/${ID(1)}`) && init?.method === 'DELETE',
+    );
+    expect(deleted).toHaveLength(1);
+    const t = texts(r);
+    expect(t).not.toContain('Solar Eclipse');
+    // Texas moves up to the top of the band.
+    expect(t).toMatch(/Choosin’ Texas[\s\S]*10\.00/);
+    alert.mockRestore();
+  });
+});
+
 describe('Add', () => {
   it('reads a playlist link, lets you untick songs, and queues the rest', async () => {
     serve({
@@ -373,7 +431,11 @@ describe('Add', () => {
     await act(async () => janiceRow.props.onPress());
     await choose(r, 'Add 1 to rank queue');
     expect(texts(r)).toContain('1 song from “Gym”');
-    expect(JSON.parse((await AsyncStorage.getItem('@aux/prototype/v4'))!).saved).toContain('ap:102');
+    // Each account keeps its own queue on the device.
+    const queueKey = (await AsyncStorage.getAllKeys()).find(
+      k => k.startsWith('@aux/queue/v5/') && k !== '@aux/queue/v5/guest',
+    )!;
+    expect(JSON.parse((await AsyncStorage.getItem(queueKey))!).saved).toContain('ap:102');
   });
 });
 

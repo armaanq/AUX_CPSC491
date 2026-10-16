@@ -111,8 +111,9 @@ export function Hot100Screen() {
       )}
       {!!chart.entries.length && (
         <Text style={ui.fine}>
-          Average scores from everyone on AUX. Ties go to the song more people
-          ranked.
+          Average scores from everyone on AUX. Songs are ordered by that
+          average, weighted by how many people ranked them, so one listener’s
+          10.00 can’t top the chart.
         </Text>
       )}
     </Page>

@@ -7,9 +7,11 @@ import React, {
 } from 'react';
 import * as Keychain from 'react-native-keychain';
 import {
+  completeOnboarding,
   getMe,
   login as apiLogin,
   signup as apiSignup,
+  updateProfile,
   type AuthResponse,
   type User,
 } from '../api/auth';
@@ -36,6 +38,12 @@ type API = {
   signUp: (email: string, username: string, password: string) => Promise<void>;
   logOut: () => Promise<void>;
   retry: () => Promise<void>;
+  /** Saves your bio to your account. Throws if the server refuses it. */
+  saveBio: (bio: string) => Promise<void>;
+  /** Marks first-run setup done; the app then opens on the Rank tab once. */
+  finishOnboarding: () => Promise<void>;
+  /** True right after finishing first-run setup, until the next login. */
+  firstRun: boolean;
 };
 
 const Context = createContext<API | null>(null);
@@ -44,10 +52,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [firstRun, setFirstRun] = useState(false);
 
   const logOut = useCallback(async () => {
     setAuthToken(null);
     setUser(null);
+    setFirstRun(false);
     setStatus('signedOut');
     await Keychain.resetGenericPassword({ service: SERVICE }).catch(() => {});
   }, []);
@@ -91,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
     setAuthToken(token);
     setUser(account);
+    setFirstRun(false);
     setError(null);
     setStatus('signedIn');
   }
@@ -107,6 +118,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           start(await apiSignup(email.trim(), username.trim(), password)),
         logOut,
         retry: restore,
+        saveBio: async bio => setUser(await updateProfile({ bio })),
+        finishOnboarding: async () => {
+          setUser(await completeOnboarding());
+          setFirstRun(true);
+        },
+        firstRun,
       }}
     >
       {children}
@@ -118,4 +135,9 @@ export function useAuth() {
   const value = useContext(Context);
   if (!value) throw new Error('AuthProvider is required');
   return value;
+}
+
+/** The logged-in user's id, or null when logged out or outside an AuthProvider. */
+export function useUserId() {
+  return useContext(Context)?.user?.id ?? null;
 }

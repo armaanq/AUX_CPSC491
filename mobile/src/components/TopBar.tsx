@@ -6,7 +6,7 @@ import { Pressable, Text, View } from 'react-native';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../state/AuthProvider';
 import { useDrawer } from '../state/DrawerContext';
-import { usePrototype } from '../state/PrototypeProvider';
+import { useFriends } from '../state/FriendsProvider';
 import { Avatar } from './Avatar';
 import { palette, ui } from './Kit';
 
@@ -18,10 +18,7 @@ export function TopBar({ title, kicker }: { title: string; kicker?: string }) {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const drawer = useDrawer();
   const { user } = useAuth();
-  const { state } = usePrototype();
-  const requests = Object.values(state.connections).filter(
-    s => s === 'incoming',
-  ).length;
+  const requests = useFriends().incoming.length;
   return (
     <View
       style={{

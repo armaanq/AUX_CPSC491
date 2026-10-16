@@ -52,14 +52,39 @@ export interface CommunityEntry {
   listeners: number;
   /** Their scores averaged, 0-10. */
   averageScore: number;
+  /** What the chart sorts by: averageScore weighted by listeners (see chartScore). */
+  chartScore: number;
 }
 
 export interface CommunityChartResponse {
-  /** Highest average score first; ties go to the song more people ranked. */
+  /** Highest chartScore first; ties go to the song more people ranked. */
   entries: CommunityEntry[];
 }
 
 const COMMUNITY_CHART_SIZE = 50;
+/**
+ * How many listeners a song needs before its own average counts for more than
+ * the AUX average. Raise it as AUX grows and songs collect more rankings.
+ */
+export const CHART_PRIOR_LISTENERS = 3;
+
+/**
+ * A song's place on the chart: its average pulled toward the AUX average until
+ * enough people have ranked it (a Bayesian average, as IMDb's Top 250 uses), so
+ * one person's 10.00 can't outrank a song many people love.
+ */
+export function chartScore(
+  averageScore: number,
+  listeners: number,
+  auxAverage: number,
+): number {
+  return (
+    (listeners * averageScore + CHART_PRIOR_LISTENERS * auxAverage) /
+    (listeners + CHART_PRIOR_LISTENERS)
+  );
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 /** The Hot 100 is the longest chart the app asks for. */
 const COMMUNITY_CHART_MAX = 100;
 /** The most songs one stats request can ask about (a page of search results). */
@@ -181,37 +206,62 @@ export class RankingsService {
         );
       }
     }
-    const groups = await this.prisma.ranking.groupBy({
-      by: ['songId'],
-      where: names
-        ? {
-            song: {
-              OR: names.map((name) => ({
-                genre: { equals: name, mode: 'insensitive' as const },
-              })),
-            },
-          }
-        : undefined,
-      _avg: { score: true },
-      _count: { songId: true },
-      orderBy: [{ _avg: { score: 'desc' } }, { _count: { songId: 'desc' } }],
-      take,
-    });
+    // The chart score needs every song's listener count, so this groups all
+    // ranked songs and sorts here. Fine for thousands of songs; move the math
+    // into SQL if AUX outgrows that.
+    const [overall, groups] = await Promise.all([
+      // Every ranking on AUX, whatever genre is selected: one shared baseline.
+      this.prisma.ranking.aggregate({ _avg: { score: true } }),
+      this.prisma.ranking.groupBy({
+        by: ['songId'],
+        where: names
+          ? {
+              song: {
+                OR: names.map((name) => ({
+                  genre: { equals: name, mode: 'insensitive' as const },
+                })),
+              },
+            }
+          : undefined,
+        _avg: { score: true },
+        _count: { songId: true },
+      }),
+    ]);
+    const auxAverage = overall._avg.score ?? 0;
+    const ranked = groups
+      .map((g) => {
+        const averageScore = g._avg.score ?? 0;
+        const listeners = g._count.songId;
+        return {
+          songId: g.songId,
+          averageScore,
+          listeners,
+          chartScore: chartScore(averageScore, listeners, auxAverage),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.chartScore - a.chartScore ||
+          b.listeners - a.listeners ||
+          b.averageScore - a.averageScore,
+      )
+      .slice(0, take);
     const songs = await this.prisma.song.findMany({
-      where: { id: { in: groups.map((g) => g.songId) } },
+      where: { id: { in: ranked.map((g) => g.songId) } },
       select: songSelect,
     });
     const byId = new Map(songs.map((s) => [s.id, s]));
     return {
-      entries: groups.flatMap((g) => {
+      entries: ranked.flatMap((g) => {
         const row = byId.get(g.songId);
         if (!row) return [];
         const { album, ...song } = row;
         return [
           {
             song: { ...song, album: album?.title ?? null },
-            listeners: g._count.songId,
-            averageScore: Math.round((g._avg.score ?? 0) * 100) / 100,
+            listeners: g.listeners,
+            averageScore: round2(g.averageScore),
+            chartScore: round2(g.chartScore),
           },
         ];
       }),
@@ -242,7 +292,7 @@ export class RankingsService {
       stats: groups.map((g) => ({
         songId: g.songId,
         listeners: g._count.songId,
-        averageScore: Math.round((g._avg.score ?? 0) * 100) / 100,
+        averageScore: round2(g._avg.score ?? 0),
       })),
     };
   }

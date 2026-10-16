@@ -9,6 +9,7 @@ import React, {
 import {
   getRankings,
   placeRanking,
+  removeRanking,
   type RankingsResponse,
 } from '../api/rankings';
 import { resolveSong } from '../api/songs';
@@ -17,6 +18,7 @@ import {
   insertRanking,
   musicFromSearch,
   registerMusic,
+  rescore,
   setSongId,
   type Ranking,
   type Sentiment,
@@ -33,6 +35,8 @@ type API = {
   error: string | null;
   /** Shows the change right away, then saves it to the server. */
   rank: (musicId: string, sentiment: Sentiment, index: number) => void;
+  /** Takes a song out of your rankings right away, then saves that. */
+  unrank: (musicId: string) => void;
   reload: () => Promise<void>;
 };
 
@@ -135,9 +139,40 @@ export function RankingsProvider({ children }: { children: React.ReactNode }) {
     [userId, adopt],
   );
 
+  const unrank = useCallback(
+    (musicId: string) => {
+      if (!userId) return;
+      setRankings(current =>
+        rescore(current.filter(r => r.musicId !== musicId)),
+      );
+      setRecent(current => current.filter(id => id !== musicId));
+      writes.current = writes.current.then(async () => {
+        // Looked up after earlier saves finish, so a song ranked moments ago has its id.
+        const songId = songIds.current.get(musicId);
+        try {
+          if (!songId) {
+            // Never reached the server, so there's nothing to remove there.
+            adopt(userId, await getRankings());
+            return;
+          }
+          adopt(userId, await removeRanking(songId));
+          // Your score no longer counts toward this song's AUX average.
+          clearSongStatsCache(songId);
+        } catch (err) {
+          if (owner.current !== userId) return;
+          await getRankings()
+            .then(saved => adopt(userId, saved))
+            .catch(() => {});
+          setError(`Couldn't remove that song. ${(err as Error).message}`);
+        }
+      });
+    },
+    [userId, adopt],
+  );
+
   return (
     <Context.Provider
-      value={{ rankings, recent, loading, error, rank, reload }}
+      value={{ rankings, recent, loading, error, rank, unrank, reload }}
     >
       {children}
     </Context.Provider>

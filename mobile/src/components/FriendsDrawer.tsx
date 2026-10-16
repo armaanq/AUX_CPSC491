@@ -3,6 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Modal,
@@ -13,89 +14,120 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { people, tasteMatch, type Person } from '../data/prototype';
+import { searchUsers, type PublicUser } from '../api/users';
 import type { RootStackParamList } from '../navigation/types';
 import { useDrawer } from '../state/DrawerContext';
-import { usePrototype } from '../state/PrototypeProvider';
-import { useRankings } from '../state/RankingsProvider';
+import { useFriends } from '../state/FriendsProvider';
 import { Avatar } from './Avatar';
 import { palette, ui } from './Kit';
 
 const WIDTH = Math.min(340, Dimensions.get('window').width * 0.86);
 
+type Found =
+  | { status: 'loading'; users: PublicUser[] }
+  | { status: 'done'; users: PublicUser[] }
+  | { status: 'error'; users: PublicUser[]; error: string };
+
+/** "87% taste match", or what you have in common so far. */
+export function tasteLine(u: PublicUser) {
+  if (u.taste.score !== null) return `${u.taste.score}% taste match`;
+  if (u.taste.shared) return `${u.taste.shared} song${u.taste.shared === 1 ? '' : 's'} in common`;
+  return `${u.rankedCount} ranked`;
+}
+
 /**
- * Slides in from the left: friend requests, your friends, and people to add.
- * Friends are still device-only demo profiles until the server has a friends API.
+ * Slides in from the left: friend requests, your friends, and people on AUX
+ * to add (searched by username, or the newest listeners).
  */
 export function FriendsDrawer() {
   const { isOpen, close } = useDrawer();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { state, connect } = usePrototype();
-  const { rankings } = useRankings();
+  const friends = useFriends();
   const [query, setQuery] = useState('');
+  const [found, setFound] = useState<Found>({ status: 'loading', users: [] });
   const x = useRef(new Animated.Value(-WIDTH)).current;
   const [visible, setVisible] = useState(isOpen);
   // Read from the app's provider: a Modal's contents don't get safe-area insets on iOS.
   const insets = useSafeAreaInsets();
+  const { reload } = friends;
 
   useEffect(() => {
-    if (isOpen) setVisible(true);
+    if (isOpen) {
+      setVisible(true);
+      // Requests and taste matches change while the drawer is closed.
+      reload();
+    }
     Animated.timing(x, {
       toValue: isOpen ? 0 : -WIDTH,
       duration: 220,
       useNativeDriver: true,
-    }).start(() => {
-      if (!isOpen) setVisible(false);
+    }).start(({ finished }) => {
+      // A close cut short by reopening mustn't hide the drawer.
+      if (finished && !isOpen) setVisible(false);
     });
-  }, [isOpen, x]);
+  }, [isOpen, x, reload]);
 
-  const q = query.trim().toLowerCase();
-  const matches = (p: Person) => !q || p.name.toLowerCase().includes(q);
-  const incoming = people.filter(
-    p => state.connections[p.id] === 'incoming' && matches(p),
-  );
-  const friends = people.filter(
-    p => state.connections[p.id] === 'friends' && matches(p),
-  );
-  const others = people.filter(
-    p =>
-      !['friends', 'incoming'].includes(state.connections[p.id]) && matches(p),
-  );
-
-  const open = (id: string) => {
-    close();
-    nav.navigate('FriendProfile', { friendId: id });
-  };
-
-  const row = (p: Person, right: React.ReactNode, note?: string) => {
-    const match = tasteMatch(rankings, p.rankings);
-    return (
-      <View key={p.id} style={[ui.row, { paddingVertical: 6 }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Open @${p.name}`}
-          onPress={() => open(p.id)}
-          style={[ui.row, { flex: 1 }]}
-        >
-          <Avatar seed={p.id} name={p.name} size={42} />
-          <View style={{ flex: 1 }}>
-            <Text style={ui.musicTitle}>@{p.name}</Text>
-            <Text style={[ui.fine]} numberOfLines={1}>
-              {note ??
-                (match.score === null
-                  ? p.genres.join(' · ')
-                  : `${match.score}% taste match`)}
-            </Text>
-          </View>
-        </Pressable>
-        {right}
-      </View>
+  const q = query.trim();
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    setFound(f => ({ status: 'loading', users: f.users }));
+    // Wait until typing pauses so each keystroke isn't a request.
+    const timer = setTimeout(
+      () =>
+        searchUsers(q, controller.signal)
+          .then(({ users }) => setFound({ status: 'done', users }))
+          .catch((err: Error) => {
+            if (!controller.signal.aborted)
+              setFound({ status: 'error', users: [], error: err.message });
+          }),
+      q ? 300 : 0,
     );
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [q, isOpen]);
+
+  const open = (user: PublicUser) => {
+    close();
+    nav.navigate('FriendProfile', { userId: user.id });
   };
 
-  const small = (label: string, onPress: () => void, primary = true) => (
+  const matches = (u: PublicUser) =>
+    !q || u.username.includes(q.replace(/^@/, '').toLowerCase());
+  const incoming = friends.incoming.filter(matches);
+  const mine = friends.friends.filter(matches);
+  const sent = friends.outgoing.filter(matches);
+  // People to add: search results you aren't already connected to.
+  const others = found.users.filter(u => friends.statusOf(u.id) === 'none');
+
+  const row = (u: PublicUser, right: React.ReactNode, note?: string) => (
+    <View key={u.id} style={[ui.row, { paddingVertical: 6 }]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open @${u.username}`}
+        onPress={() => open(u)}
+        style={[ui.row, { flex: 1 }]}
+      >
+        <Avatar seed={u.id} name={u.username} size={42} />
+        <View style={{ flex: 1 }}>
+          <Text style={ui.musicTitle} numberOfLines={1}>
+            @{u.username}
+          </Text>
+          <Text style={ui.fine} numberOfLines={1}>
+            {note ?? tasteLine(u)}
+          </Text>
+        </View>
+      </Pressable>
+      {right}
+    </View>
+  );
+
+  const small = (label: string, onPress: () => void, primary = true, a11y?: string) => (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={a11y}
       onPress={onPress}
       style={{
         minHeight: 36,
@@ -116,6 +148,8 @@ export function FriendsDrawer() {
       </Text>
     </Pressable>
   );
+  // Failures show as friends.error; the lists put themselves back.
+  const quietly = (p: Promise<void>) => p.catch(() => {});
 
   return (
     <Modal
@@ -168,7 +202,7 @@ export function FriendsDrawer() {
           >
             <TextInput
               accessibilityLabel="Find people by username"
-              placeholder="Find people…"
+              placeholder="Find people by username…"
               placeholderTextColor={palette.muted}
               value={query}
               onChangeText={setQuery}
@@ -176,17 +210,22 @@ export function FriendsDrawer() {
               autoCorrect={false}
               style={ui.input}
             />
+            {friends.error && (
+              <Text accessibilityRole="alert" style={[ui.body, { color: palette.accent }]}>
+                {friends.error}
+              </Text>
+            )}
             {incoming.length > 0 && (
               <>
                 <Text style={ui.label}>
                   {incoming.length} REQUEST{incoming.length === 1 ? '' : 'S'}
                 </Text>
-                {incoming.map(p =>
+                {incoming.map(u =>
                   row(
-                    p,
+                    u,
                     <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {small('Accept', () => connect(p.id, 'accept'))}
-                      {small('✕', () => connect(p.id, 'remove'), false)}
+                      {small('Accept', () => quietly(friends.add(u)), true, `Accept @${u.username}`)}
+                      {small('✕', () => quietly(friends.remove(u)), false, `Decline @${u.username}`)}
                     </View>,
                     'Wants to be friends',
                   ),
@@ -194,31 +233,40 @@ export function FriendsDrawer() {
                 <View style={ui.divider} />
               </>
             )}
-            <Text style={ui.label}>FRIENDS · {friends.length}</Text>
-            {friends.map(p => row(p, null))}
-            {!friends.length && (
+            <Text style={ui.label}>FRIENDS · {friends.friends.length}</Text>
+            {mine.map(u => row(u, null))}
+            {!mine.length && (
               <Text style={ui.body}>
-                {q ? 'No friends match that name.' : 'Add people below to compare taste.'}
+                {friends.loading && !friends.friends.length
+                  ? 'Loading your friends…'
+                  : q
+                  ? 'No friends match that name.'
+                  : 'Find people below to compare taste.'}
               </Text>
+            )}
+            {sent.length > 0 && (
+              <>
+                <Text style={ui.label}>SENT</Text>
+                {sent.map(u =>
+                  row(
+                    u,
+                    small('Requested', () => quietly(friends.remove(u)), false, `Cancel request to @${u.username}`),
+                  ),
+                )}
+              </>
             )}
             <View style={ui.divider} />
-            <Text style={ui.label}>DISCOVER PEOPLE</Text>
-            {others.map(p =>
-              row(
-                p,
-                state.connections[p.id] === 'outgoing'
-                  ? small('Requested', () => connect(p.id, 'remove'), false)
-                  : small('+ Add', () => connect(p.id, 'request')),
-              ),
+            <Text style={ui.label}>{q ? 'PEOPLE ON AUX' : 'NEW ON AUX'}</Text>
+            {found.status === 'loading' && !others.length && (
+              <ActivityIndicator color={palette.ink} />
             )}
-            {!others.length && (
+            {found.status === 'error' && <Text style={ui.body}>{found.error}</Text>}
+            {others.map(u => row(u, small('+ Add', () => quietly(friends.add(u)), true, `Add @${u.username}`)))}
+            {found.status === 'done' && !others.length && (
               <Text style={ui.body}>
-                {q ? 'Nobody else by that name yet.' : 'You’ve met everyone here.'}
+                {q ? `Nobody else matches “${q}”.` : 'You’re connected with everyone new.'}
               </Text>
             )}
-            <Text style={ui.fine}>
-              Demo profiles · friend requests stay on this device for now.
-            </Text>
           </ScrollView>
         </View>
       </Animated.View>

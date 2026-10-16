@@ -30,3 +30,10 @@ export function placeRanking(
     body: JSON.stringify({ sentiment, position }),
   });
 }
+
+/** Takes a song out of your rankings; the rest of its band re-spreads. */
+export function removeRanking(songId: string) {
+  return request<RankingsResponse>(`/me/rankings/${songId}`, {
+    method: 'DELETE',
+  });
+}

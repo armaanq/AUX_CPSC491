@@ -6,5 +6,7 @@ import { RankingsService } from './rankings.service.js';
 @Module({
   controllers: [RankingsController, CommunityChartController],
   providers: [RankingsService],
+  // Friends' profiles show their rankings.
+  exports: [RankingsService],
 })
 export class RankingsModule {}

@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { RankingsService } from './rankings.service.js';
+import { chartScore, RankingsService } from './rankings.service.js';
 import type { Placement } from './scoring.js';
 
 const USER = '11111111-1111-4111-8111-111111111111';
@@ -135,9 +135,11 @@ describe('RankingsService.community', () => {
   function communitySetup(
     groups: { songId: string; avg: number; count: number }[],
     songs: { id: string; title: string }[],
+    auxAverage: number | null = 6.5,
   ) {
     const prisma = {
       ranking: {
+        aggregate: vi.fn().mockResolvedValue({ _avg: { score: auxAverage } }),
         groupBy: vi.fn().mockResolvedValue(
           groups.map((g) => ({
             songId: g.songId,
@@ -158,53 +160,83 @@ describe('RankingsService.community', () => {
     };
   }
 
-  it('combines everyone’s rankings: best average first, with listener counts', async () => {
-    const { service, prisma } = communitySetup(
+  it('weights each average by how many people ranked it', () => {
+    // AUX average 6.5, three listeners' worth of pull toward it.
+    expect(chartScore(10, 1, 6.5)).toBeCloseTo(7.375);
+    expect(chartScore(9.5, 4, 6.5)).toBeCloseTo(8.214, 3);
+    expect(chartScore(9, 20, 6.5)).toBeCloseTo(8.674, 3);
+  });
+
+  it('puts a song many people love above one person’s 10.00', async () => {
+    const { service } = communitySetup(
       [
-        { songId: SONG(2), avg: 9.444, count: 3 },
-        { songId: SONG(1), avg: 8.34, count: 1 },
+        { songId: SONG(1), avg: 10, count: 1 },
+        { songId: SONG(2), avg: 9, count: 20 },
+        { songId: SONG(3), avg: 9.5, count: 4 },
       ],
       // The database returns songs in any order; the chart order must win.
       [
         { id: SONG(1), title: 'Ivy' },
         { id: SONG(2), title: 'Nights' },
+        { id: SONG(3), title: 'Nikes' },
       ],
     );
     const { entries } = await service.community();
     expect(
-      entries.map((e) => [e.song.title, e.averageScore, e.listeners]),
+      entries.map((e) => [e.song.title, e.averageScore, e.listeners, e.chartScore]),
     ).toEqual([
-      ['Nights', 9.44, 3],
-      ['Ivy', 8.34, 1],
+      ['Nights', 9, 20, 8.67],
+      ['Nikes', 9.5, 4, 8.21],
+      ['Ivy', 10, 1, 7.38],
     ]);
     expect(entries[0].song.album).toBe('Blonde');
-    expect(prisma.ranking.groupBy.mock.calls[0][0].orderBy).toEqual([
-      { _avg: { score: 'desc' } },
-      { _count: { songId: 'desc' } },
-    ]);
+  });
+
+  it('breaks ties in favor of the song more people ranked', async () => {
+    // Every song averages the AUX average, so all three chart scores are equal.
+    const { service } = communitySetup(
+      [
+        { songId: SONG(1), avg: 8.5, count: 3 },
+        { songId: SONG(2), avg: 8.5, count: 3 },
+        { songId: SONG(3), avg: 8.5, count: 9 },
+      ],
+      [
+        { id: SONG(1), title: 'Ivy' },
+        { id: SONG(2), title: 'Nights' },
+        { id: SONG(3), title: 'Nikes' },
+      ],
+      8.5,
+    );
+    const { entries } = await service.community();
+    expect(entries[0].song.title).toBe('Nikes');
   });
 
   it('is empty before anyone has ranked anything', async () => {
-    const { service } = communitySetup([], []);
+    const { service } = communitySetup([], [], null);
     await expect(service.community()).resolves.toEqual({ entries: [] });
   });
 
-  it('filters to one genre family and takes up to 100 (the Hot 100)', async () => {
+  it('filters to one genre family but keeps the AUX-wide baseline', async () => {
     const { service, prisma } = communitySetup([], []);
     await service.community({ genre: 'hip-hop', limit: '100' });
     const args = prisma.ranking.groupBy.mock.calls[0][0];
-    expect(args.take).toBe(100);
     expect(args.where.song.OR).toContainEqual({
       genre: { equals: 'Hip-Hop/Rap', mode: 'insensitive' },
     });
+    expect(prisma.ranking.aggregate.mock.calls[0][0].where).toBeUndefined();
   });
 
-  it('keeps the 50-song default and treats "all" as no filter', async () => {
-    const { service, prisma } = communitySetup([], []);
-    await service.community({ genre: 'all' });
-    const args = prisma.ranking.groupBy.mock.calls[0][0];
-    expect(args.take).toBe(50);
-    expect(args.where).toBeUndefined();
+  it('returns 50 songs by default, up to 100 when asked, and treats "all" as no filter', async () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      songId: SONG(i + 1),
+      avg: 5 + (i % 50) / 10,
+      count: 1 + (i % 7),
+    }));
+    const songs = many.map((g) => ({ id: g.songId, title: g.songId }));
+    const { service, prisma } = communitySetup(many, songs);
+    expect((await service.community({ genre: 'all' })).entries).toHaveLength(50);
+    expect(prisma.ranking.groupBy.mock.calls[0][0].where).toBeUndefined();
+    expect((await service.community({ limit: '100' })).entries).toHaveLength(100);
   });
 
   it('rejects unknown genres and out-of-range limits', async () => {

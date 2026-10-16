@@ -30,6 +30,8 @@ export type CommunityEntry = {
   song: RankedSong['song'];
   listeners: number;
   averageScore: number;
+  /** What the chart sorts by: the average, weighted by how many people ranked it. */
+  chartScore: number;
 };
 
 /** Genre filters for the Hot 100. Keys match COMMUNITY_GENRES on the server. */

@@ -10,6 +10,7 @@ import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Splash } from './src/components/Splash';
 import { AuthProvider } from './src/state/AuthProvider';
+import { FriendsProvider } from './src/state/FriendsProvider';
 import { PrototypeProvider } from './src/state/PrototypeProvider';
 import { PreviewProvider } from './src/state/PreviewProvider';
 import { RankingsProvider } from './src/state/RankingsProvider';
@@ -23,9 +24,11 @@ function App() {
       <AuthProvider>
         <RankingsProvider>
           <PrototypeProvider>
-            <PreviewProvider>
-              <RootNavigator />
-            </PreviewProvider>
+            <FriendsProvider>
+              <PreviewProvider>
+                <RootNavigator />
+              </PreviewProvider>
+            </FriendsProvider>
           </PrototypeProvider>
         </RankingsProvider>
       </AuthProvider>
