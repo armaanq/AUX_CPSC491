@@ -8,6 +8,7 @@ import {
   SignupScreen,
 } from '../screens/AuthScreens';
 import { CompareScreen } from '../screens/CompareScreen';
+import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { FriendProfileScreen } from '../screens/SocialScreens';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { useAuth } from '../state/AuthProvider';
@@ -31,14 +32,19 @@ const navigationTheme = {
 };
 
 export function RootNavigator() {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
+  // A new account imports a playlist before anything else. (An older server
+  // that doesn't report onboardedAt counts as set up.)
+  const needsSetup = status === 'signedIn' && user?.onboardedAt === null;
   if (status === 'loading') return <SessionLoading />;
   if (status === 'offline') return <SessionOffline />;
   return (
     <NavigationContainer theme={navigationTheme}>
       {/* Logged-out users only have the login screens, so nothing else is reachable. */}
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {status === 'signedIn' ? (
+        {needsSetup ? (
+          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        ) : status === 'signedIn' ? (
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen

@@ -247,7 +247,7 @@ describe('Discover search', () => {
 });
 
 describe('catalog songs in your library', () => {
-  // Rankings come from the server now; saved and pinned songs still live on the device.
+  // Rankings come from the server now; the rank queue still lives on the device.
   it('a saved catalog song survives an app restart', async () => {
     const item = musicFromSearch({
       ...ivy,
@@ -272,11 +272,11 @@ describe('catalog songs in your library', () => {
     await act(async () => again.unmount());
   });
 
-  it('a pinned Apple Music album survives an app restart', async () => {
+  it('a queued Apple Music album survives an app restart', async () => {
     const item = musicFromAlbum(blonde);
     registerMusic([item]);
     const r = await mount();
-    await act(async () => current.toggleFavorite(item.id));
+    await act(async () => current.toggleSaved(item.id));
     await act(async () => r.unmount());
 
     music.splice(
@@ -285,7 +285,7 @@ describe('catalog songs in your library', () => {
     );
     const again = await mount();
     expect(current.error).toBeNull();
-    expect(current.state.favorites).toContain(item.id);
+    expect(current.state.saved).toContain(item.id);
     expect(findMusic(item.id)).toMatchObject({ kind: 'album', title: 'Blonde' });
     await act(async () => again.unmount());
   });

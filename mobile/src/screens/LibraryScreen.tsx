@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { Button, Chips, Cover, Empty, Page, ScorePill, palette, ui } from '../components/Kit';
 import { TopBar } from '../components/TopBar';
 import {
@@ -24,8 +24,10 @@ const FILTER_BAND: Record<Exclude<Filter, 'All'>, Sentiment> = {
 /** Every song you've ranked, best first, with its overall position. */
 export function LibraryScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { rankings, loading, reload } = useRankings();
+  const { rankings, loading, reload, unrank } = useRankings();
   const [filter, setFilter] = useState<Filter>('All');
+  // Select mode shows a remove button on every song.
+  const [selecting, setSelecting] = useState(false);
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
 
@@ -79,6 +81,19 @@ export function LibraryScreen() {
             clearButtonMode="while-editing"
           />
           <Chips values={FILTERS} value={filter} onChange={setFilter} />
+          <View style={ui.between}>
+            <Text style={ui.fine}>
+              {selecting ? 'Tap ✕ to take a song out of your rankings.' : ' '}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setSelecting(v => !v)}
+              hitSlop={10}
+              style={{ minHeight: 36, justifyContent: 'center' }}
+            >
+              <Text style={ui.link}>{selecting ? 'Done' : 'Select'}</Text>
+            </Pressable>
+          </View>
           {SENTIMENT_ORDER.map(band => {
             const inBand = rows.filter(r => r.sentiment === band);
             if (!inBand.length) return null;
@@ -95,6 +110,7 @@ export function LibraryScreen() {
                     key={r.musicId}
                     accessibilityRole="button"
                     accessibilityLabel={`Number ${r.position}, ${r.item.title} by ${r.item.artist}, score ${r.score.toFixed(2)}`}
+                    disabled={selecting}
                     onPress={() => nav.navigate('MusicDetail', { musicId: r.musicId })}
                     style={({ pressed }) => [
                       ui.row,
@@ -122,6 +138,30 @@ export function LibraryScreen() {
                       </Text>
                     </View>
                     <ScorePill label="SCORE" score={r.score} strong />
+                    {selecting && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${r.item.title} from your rankings`}
+                        hitSlop={8}
+                        onPress={() =>
+                          Alert.alert(
+                            'Remove from your rankings?',
+                            `“${r.item.title}” leaves your library, and the songs around it shift up.`,
+                            [
+                              { text: 'Keep it', style: 'cancel' },
+                              {
+                                text: 'Remove',
+                                style: 'destructive',
+                                onPress: () => unrank(r.musicId),
+                              },
+                            ],
+                          )
+                        }
+                        style={{ width: 32, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Text style={[ui.body, { color: palette.accent, fontSize: 18 }]}>✕</Text>
+                      </Pressable>
+                    )}
                   </Pressable>
                 ))}
               </View>

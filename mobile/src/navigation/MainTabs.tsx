@@ -9,6 +9,7 @@ import { DiscoverScreen } from '../screens/DiscoverScreen';
 import { Hot100Screen } from '../screens/Hot100Screen';
 import { LibraryScreen } from '../screens/LibraryScreen';
 import { RankScreen } from '../screens/RankScreen';
+import { useAuth } from '../state/AuthProvider';
 import { DrawerProvider } from '../state/DrawerContext';
 import { findMusic } from '../data/prototype';
 import { usePrototype } from '../state/PrototypeProvider';
@@ -73,6 +74,8 @@ const NoLabel = () => null;
 
 export function MainTabs() {
   const { state } = usePrototype();
+  // Right after first-run setup, open on the queue that setup just filled.
+  const { firstRun } = useAuth();
   // Only songs can be ranked; queued albums don't count toward the badge.
   const queued = state.saved.filter(id => {
     const m = findMusic(id);
@@ -81,6 +84,7 @@ export function MainTabs() {
   return (
     <DrawerProvider>
       <Tab.Navigator
+        initialRouteName={firstRun ? 'Rank' : 'Discover'}
         screenOptions={{
           headerShown: false,
           tabBarActiveTintColor: palette.accent,

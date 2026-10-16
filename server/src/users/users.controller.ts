@@ -1,6 +1,10 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post } from '@nestjs/common';
 import { CurrentUserId } from '../auth/current-user.decorator.js';
-import { UsersService, type SelfUser } from './users.service.js';
+import {
+  UsersService,
+  type ProfileBody,
+  type SelfUser,
+} from './users.service.js';
 
 @Controller('me')
 export class MeController {
@@ -10,5 +14,21 @@ export class MeController {
   @Get()
   me(@CurrentUserId() userId: string): Promise<SelfUser> {
     return this.users.findSelf(userId);
+  }
+
+  /** PATCH /me { bio } — edit your profile. */
+  @Patch()
+  update(
+    @CurrentUserId() userId: string,
+    @Body() body: ProfileBody | undefined,
+  ): Promise<SelfUser> {
+    return this.users.updateProfile(userId, body ?? {});
+  }
+
+  /** POST /me/onboarded — first-run setup (importing a playlist) is done. */
+  @Post('onboarded')
+  @HttpCode(200)
+  onboarded(@CurrentUserId() userId: string): Promise<SelfUser> {
+    return this.users.completeOnboarding(userId);
   }
 }

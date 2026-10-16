@@ -35,6 +35,8 @@ model User {
   bio            String   @default("")
   avatarUrl      String?
   favoriteGenres String[]
+  /// When the user finished first-run setup (importing a playlist). Null until then.
+  onboardedAt    DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

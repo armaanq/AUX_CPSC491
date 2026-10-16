@@ -12,9 +12,11 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   Login: undefined;
   Signup: undefined;
+  /** First-run setup for a new account: import a playlist. */
+  Onboarding: undefined;
   MainTabs: NavigatorScreenParams<MainTabParamList>;
   Compare: { musicId: string };
   MusicDetail: { musicId: string };
-  FriendProfile: { friendId: string };
+  FriendProfile: { userId: string };
   Profile: undefined;
 };

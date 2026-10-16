@@ -12,6 +12,7 @@ import {
 } from '../data/prototype';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../state/AuthProvider';
+import { useFriends } from '../state/FriendsProvider';
 import { usePrototype } from '../state/PrototypeProvider';
 import { useRankings } from '../state/RankingsProvider';
 import { useSongStats } from '../state/useSongStats';
@@ -80,15 +81,18 @@ function Bars({ rows }: { rows: [string, number][] }) {
 /** Your account and the numbers behind your taste. Opened from the top-right avatar. */
 export function ProfileScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { user, logOut } = useAuth();
-  const { state, setBio } = usePrototype();
+  const { user, logOut, saveBio } = useAuth();
+  const { state } = usePrototype();
   const { rankings } = useRankings();
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(state.bio);
+  const bio = user?.bio ?? '';
+  const [draft, setDraft] = useState(bio);
+  const [saving, setSaving] = useState(false);
+  const [bioError, setBioError] = useState<string | null>(null);
 
   const items = rankings.map(r => ({ ...r, item: findMusic(r.musicId) })).filter(r => r.item);
   const avg = averageScore(rankings);
-  const friends = Object.values(state.connections).filter(s => s === 'friends').length;
+  const friends = useFriends().friends.length;
   const bands = SENTIMENT_ORDER.map(s => ({
     sentiment: s,
     count: rankings.filter(r => r.sentiment === s).length,
@@ -129,27 +133,48 @@ export function ProfileScreen() {
             onChangeText={setDraft}
             style={ui.input}
           />
+          {bioError && (
+            <Text accessibilityRole="alert" style={[ui.body, { color: palette.accent }]}>
+              {bioError}
+            </Text>
+          )}
           <Button
-            title="Save bio"
+            title={saving ? 'Saving…' : 'Save bio'}
+            onPress={async () => {
+              if (saving) return;
+              setSaving(true);
+              try {
+                await saveBio(draft.trim());
+                setBioError(null);
+                setEditing(false);
+              } catch (err) {
+                setBioError(`Couldn't save your bio. ${(err as Error).message}`);
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+          <Button
+            secondary
+            title="Cancel"
             onPress={() => {
-              setBio(draft.trim());
+              setBioError(null);
               setEditing(false);
             }}
           />
-          <Button secondary title="Cancel" onPress={() => setEditing(false)} />
         </View>
       ) : (
         <Pressable
           accessibilityRole="button"
           accessibilityHint="Edit your bio"
           onPress={() => {
-            setDraft(state.bio);
+            setDraft(bio);
             setEditing(true);
           }}
           style={{ alignItems: 'center', minHeight: 44, justifyContent: 'center' }}
         >
           <Text style={[ui.body, { textAlign: 'center' }]}>
-            {state.bio || 'Add a bio'}
+            {bio || 'Add a bio'}
           </Text>
           <Text style={[ui.link, { fontSize: 12 }]}>Edit</Text>
         </Pressable>
@@ -233,13 +258,6 @@ export function ProfileScreen() {
         <>
           <Text style={ui.heading}>Your top 10</Text>
           <Shelf items={items.slice(0, 10).map(r => r.item)} onPress={open} />
-        </>
-      )}
-
-      {state.favorites.length > 0 && (
-        <>
-          <Text style={ui.heading}>Pinned favorites</Text>
-          <Shelf items={state.favorites.map(findMusic).filter(Boolean)} onPress={open} />
         </>
       )}
 

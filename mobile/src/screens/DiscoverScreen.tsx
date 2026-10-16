@@ -74,6 +74,10 @@ function CompareRow({
   );
 }
 
+/** Hottest takes shown before "Show more", and the most it can expand to. */
+const TAKES = 3;
+const MAX_TAKES = 10;
+
 /**
  * Search any song and see how your score compares with everyone on AUX.
  * Before a search: the songs where you disagree with AUX most, and what's
@@ -86,6 +90,7 @@ export function DiscoverScreen() {
   const [query, setQuery] = useState(route.params?.query ?? '');
   const [kind, setKind] = useState('Songs');
   const [remote, setRemote] = useState<RemoteSearch>(IDLE);
+  const [allTakes, setAllTakes] = useState(false);
   const charts = useCharts();
 
   // A new pre-filled query (from Add's "search manually") replaces the box.
@@ -149,7 +154,8 @@ export function DiscoverScreen() {
         : [];
     })
     .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap))
-    .slice(0, 5);
+    .slice(0, MAX_TAKES);
+  const shownTakes = allTakes ? takes : takes.slice(0, TAKES);
 
   return (
     <Page header={<TopBar title="Discover" kicker="YOU VS. AUX" />}>
@@ -175,7 +181,7 @@ export function DiscoverScreen() {
             </Text>
           </View>
           <SectionHeader title="Your hottest takes" note={takes.length ? 'vs. AUX' : undefined} />
-          {takes.map(t => (
+          {shownTakes.map(t => (
             <CompareRow
               key={t.item.id}
               item={t.item}
@@ -187,6 +193,18 @@ export function DiscoverScreen() {
               onPress={() => open(t.item.id)}
             />
           ))}
+          {takes.length > TAKES && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: allTakes }}
+              onPress={() => setAllTakes(v => !v)}
+              style={{ minHeight: 40, justifyContent: 'center' }}
+            >
+              <Text style={ui.link}>
+                {allTakes ? 'Show less' : `Show ${takes.length - TAKES} more`}
+              </Text>
+            </Pressable>
+          )}
           {!takes.length && (
             <Text style={ui.body}>
               Once other people rank songs you’ve ranked, the ones where you

@@ -1,285 +1,230 @@
-import React, { useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type {
   NativeStackNavigationProp,
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import { findMusic, people, tasteMatch } from '../data/prototype';
-import { usePrototype } from '../state/PrototypeProvider';
-import { useAuth } from '../state/AuthProvider';
+import { getProfile, type FriendStatus, type ProfileResponse } from '../api/users';
+import { findMusic, musicFromSearch, registerMusic, type Music } from '../data/prototype';
+import { useFriends } from '../state/FriendsProvider';
 import { useRankings } from '../state/RankingsProvider';
 import { Avatar } from '../components/Avatar';
-import {
-  Button,
-  Chips,
-  Empty,
-  MusicRow,
-  Page,
-  Shelf,
-  palette,
-  ui,
-} from '../components/Kit';
-const useNav = () =>
-  useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+import { Button, Empty, MusicRow, Page, palette, scoreTone, ui } from '../components/Kit';
+import { tally } from './ProfileScreen';
+
+/** How many of their rankings show before "Show all". */
+const PREVIEW = 20;
+
+type Loaded = {
+  profile: ProfileResponse;
+  /** Their rankings as app music, best first. */
+  ranked: { item: Music; score: number }[];
+};
+
+type Load =
+  | { status: 'loading' }
+  | { status: 'error'; error: string }
+  | ({ status: 'done' } & Loaded);
+
+/** Another listener's profile: who they are, your taste match, and their rankings. */
 export function FriendProfileScreen({
   route,
 }: NativeStackScreenProps<RootStackParamList, 'FriendProfile'>) {
-  return <ProfileContent friendId={route.params.friendId} />;
-}
-/** Another listener's profile: taste match, their favorites and rankings. */
-function ProfileContent({ friendId }: { friendId: string }) {
-  const nav = useNav();
-  const { state, connect, setBio } = usePrototype();
-  const { rankings: myRankings } = useRankings();
-  const { user, logOut } = useAuth();
-  const [tab, setTab] = useState('Songs');
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(state.bio);
-  const person = people.find(p => p.id === friendId);
-  const own = !friendId;
-  if (!own && !person)
+  const { userId } = route.params;
+  const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const friends = useFriends();
+  const { rankings: mine } = useRankings();
+  const [load, setLoad] = useState<Load>({ status: 'loading' });
+  const [showAll, setShowAll] = useState(false);
+  // After you add or remove them here, the friends list is the source of truth.
+  const [touched, setTouched] = useState(false);
+
+  const fetchProfile = useCallback(() => {
+    let active = true;
+    setLoad({ status: 'loading' });
+    getProfile(userId)
+      .then(profile => {
+        const items = profile.rankings.map(r =>
+          musicFromSearch({ ...r.song, songId: r.song.id }),
+        );
+        registerMusic(items);
+        if (active)
+          setLoad({
+            status: 'done',
+            profile,
+            ranked: profile.rankings.map((r, i) => ({ item: findMusic(items[i].id), score: r.score })),
+          });
+      })
+      .catch((err: Error) => {
+        if (active) setLoad({ status: 'error', error: err.message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+  useEffect(fetchProfile, [fetchProfile]);
+
+  if (load.status === 'loading')
     return (
-      <Page insetTop={own}>
-        <Empty
-          title="Listener not found"
-          body="Return to your circle and choose another profile."
-        />
+      <Page insetTop={false}>
+        <ActivityIndicator color={palette.ink} />
+        <Text style={[ui.body, { textAlign: 'center' }]}>Loading their profile…</Text>
       </Page>
     );
-  const rankings = own ? myRankings : person!.rankings;
-  const name = own ? user?.username ?? '' : person!.name;
-  const status = friendId ? state.connections[friendId] : null;
-  const favorites = own
-    ? state.favorites
-    : rankings.slice(0, 3).map(r => r.musicId);
-  const match = tasteMatch(myRankings, rankings);
-  const genres = Array.from(
-    new Set(rankings.map(r => findMusic(r.musicId).genre)),
+  if (load.status === 'error')
+    return (
+      <Page insetTop={false}>
+        <Empty title="Couldn’t load this profile" body={load.error} />
+        <Button title="Try again" onPress={fetchProfile} />
+      </Page>
+    );
+
+  const { user } = load.profile;
+  const live = friends.statusOf(user.id);
+  const status: FriendStatus =
+    user.status === 'self' ? 'self' : live !== 'none' || touched ? live : user.status;
+  const act = (change: Promise<void>) => {
+    setTouched(true);
+    // A failure shows up in the friends drawer; the button puts itself back.
+    change.catch(() => {});
+  };
+  const confirmRemove = () =>
+    Alert.alert('Remove friend?', `Remove @${user.username} from your friends?`, [
+      { text: 'Keep friend', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => act(friends.remove(user)) },
+    ]);
+
+  // Songs you've both ranked: your score next to theirs.
+  const myScore = new Map(
+    mine.flatMap(r => {
+      const songId = findMusic(r.musicId)?.songId;
+      return songId ? [[songId, r.score] as const] : [];
+    }),
   );
+  const shared = load.ranked
+    .flatMap(r => {
+      const yours = r.item.songId ? myScore.get(r.item.songId) : undefined;
+      return yours === undefined ? [] : [{ ...r, yours }];
+    })
+    .slice(0, 5);
+  const genres = tally(load.ranked.map(r => r.item.genre).filter(g => g && g !== 'Other'), 3);
+  const since = new Date(user.createdAt).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
   const open = (musicId: string) => nav.navigate('MusicDetail', { musicId });
-  const visible =
-    tab === 'Saved'
-      ? state.saved.map(id => ({ musicId: id, score: undefined }))
-      : [...rankings].sort((a, b) => b.score - a.score);
+  const visible = showAll ? load.ranked : load.ranked.slice(0, PREVIEW);
+
   return (
-    <Page insetTop={own}>
-      <Text style={ui.label}>
-        {own ? 'YOUR PERSONAL LINER NOTES' : 'MEET YOUR NEXT MUSIC FRIEND'}
-      </Text>
+    <Page insetTop={false}>
       <View style={ui.row}>
-        <Avatar seed={friendId || 'me'} name={name} size={76} />
-        <View style={{ flex: 1 }}>
-          <Text style={[ui.title, { fontSize: 30 }]}>@{name}</Text>
+        <Avatar seed={user.id} name={user.username} size={76} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={[ui.title, { fontSize: 28 }]} numberOfLines={1}>
+            @{user.username}
+          </Text>
           <Text style={ui.body}>
-            {rankings.length} ranked
-            {own
-              ? ` · ${
-                  Object.values(state.connections).filter(s => s === 'friends')
-                    .length
-                } friends`
-              : ''}
+            {user.rankedCount} ranked · on AUX since {since}
           </Text>
         </View>
       </View>
-      {editing ? (
-        <View style={{ gap: 10 }}>
-          <TextInput
-            accessibilityLabel="Profile bio"
-            multiline
-            maxLength={160}
-            value={draft}
-            onChangeText={setDraft}
-            style={ui.input}
-          />
-          <Button
-            title="Save bio"
-            onPress={() => {
-              setBio(draft.trim());
-              setEditing(false);
-            }}
-          />
-          <Button secondary title="Cancel" onPress={() => setEditing(false)} />
-        </View>
-      ) : (
-        <>
-          <Text style={ui.body}>{own ? state.bio : person!.bio}</Text>
-          {own && (
-            <Pressable
-              accessibilityRole="button"
-              style={{ minHeight: 44, justifyContent: 'center' }}
-              onPress={() => {
-                setDraft(state.bio);
-                setEditing(true);
-              }}
-            >
-              <Text style={ui.link}>Edit your bio ↗</Text>
-            </Pressable>
-          )}
-        </>
+      {!!user.bio && <Text style={ui.body}>{user.bio}</Text>}
+
+      {status === 'none' && (
+        <Button title="Add friend" onPress={() => act(friends.add(user))} />
       )}
-      <View style={[ui.row, { flexWrap: 'wrap' }]}>
-        {genres.map(g => (
-          <View key={g} style={ui.chip}>
-            <Text style={ui.chipText}>{g}</Text>
-          </View>
-        ))}
-      </View>
-      {!own && (
-        <>
-          <Button
-            title={
-              status === 'friends'
-                ? '✓ Friends · Remove'
-                : status === 'incoming'
-                ? 'Accept friend request'
-                : status === 'outgoing'
-                ? 'Request pending · Cancel'
-                : 'Send friend request'
-            }
-            secondary={status === 'friends' || status === 'outgoing'}
-            onPress={() => {
-              if (status === 'friends')
-                Alert.alert(
-                  'Remove friend?',
-                  `Remove @${name} from your circle?`,
-                  [
-                    { text: 'Keep friend', style: 'cancel' },
-                    {
-                      text: 'Remove',
-                      style: 'destructive',
-                      onPress: () => connect(friendId!, 'remove'),
-                    },
-                  ],
-                );
-              else
-                connect(
-                  friendId!,
-                  status === 'incoming'
-                    ? 'accept'
-                    : status === 'outgoing'
-                    ? 'remove'
-                    : 'request',
-                );
-            }}
-          />
-          <View style={[ui.card, { backgroundColor: '#E8EDE5' }]}>
-            <Text style={ui.label}>YOUR TASTE, SIDE BY SIDE</Text>
-            <Text style={[ui.title, { color: palette.green }]}>
-              {match.score === null
-                ? 'Still getting to know you.'
-                : `${match.score}% in tune`}
-            </Text>
-            <Text style={ui.body}>
-              {match.score === null
-                ? `You share ${match.count} ranked songs. Rank at least 3 of the same titles to see a match.`
-                : `Based on ${match.count} shared titles and how closely your scores agree. A small sample is only a first impression.`}
-            </Text>
-            <Text style={ui.musicTitle}>Shared genres</Text>
-            <Text style={ui.body}>
-              {genres
-                .filter(g =>
-                  myRankings.some(r => findMusic(r.musicId).genre === g),
-                )
-                .join(' · ') || 'More to discover together'}
-            </Text>
-          </View>
-          {match.count > 0 && (
-            <View style={ui.card}>
-              <Text style={ui.heading}>Where you meet (or don’t)</Text>
-              <Text style={ui.body}>Your score / their score</Text>
-              {rankings
-                .filter(r =>
-                  myRankings.some(mine => mine.musicId === r.musicId),
-                )
-                .slice(0, 5)
-                .map(r => (
-                  <View key={r.musicId}>
-                    <Text style={ui.musicTitle}>
-                      {findMusic(r.musicId).title}
-                    </Text>
-                    <Text style={ui.body}>
-                      {myRankings
-                        .find(mine => mine.musicId === r.musicId)!
-                        .score.toFixed(2)}{' '}
-                      / {r.score.toFixed(2)} ·{' '}
-                      {Math.abs(
-                        myRankings.find(mine => mine.musicId === r.musicId)!
-                          .score - r.score,
-                      ) < 1
-                        ? 'On the same wavelength'
-                        : 'A different take'}
-                    </Text>
-                  </View>
-                ))}
-            </View>
-          )}
-        </>
-      )}
-      <View>
-        <Text style={ui.heading}>
-          {own ? 'The favorites shelf' : 'Their top rotation'}
-        </Text>
-        <Text style={ui.body}>
-          {own
-            ? 'The music that feels like you.'
-            : 'Start here to understand their taste.'}
-        </Text>
-      </View>
-      {favorites.length ? (
-        <Shelf items={favorites.map(findMusic)} onPress={open} />
-      ) : (
-        <Empty
-          title="Make this space yours"
-          body="Open any song or album and pin it to your favorites."
+      {status === 'outgoing' && (
+        <Button
+          secondary
+          title="Request sent · Cancel"
+          onPress={() => act(friends.remove(user))}
         />
       )}
-      {own && (
-        <Chips values={['Songs', 'Saved']} value={tab} onChange={setTab} />
+      {status === 'incoming' && (
+        <>
+          <Button title="Accept friend request" onPress={() => act(friends.add(user))} />
+          <Button secondary title="Decline" onPress={() => act(friends.remove(user))} />
+        </>
       )}
+      {status === 'friends' && <Button secondary title="✓ Friends" onPress={confirmRemove} />}
+
+      {status !== 'self' && (
+        <View style={[ui.card, { backgroundColor: '#E8EDE5', borderColor: '#E8EDE5' }]}>
+          <Text style={ui.label}>YOUR TASTE, SIDE BY SIDE</Text>
+          <Text
+            style={[
+              ui.title,
+              {
+                fontSize: 30,
+                color: user.taste.score === null ? palette.muted : scoreTone(user.taste.score / 10),
+              },
+            ]}
+          >
+            {user.taste.score === null ? 'Still getting to know you' : `${user.taste.score}% in tune`}
+          </Text>
+          <Text style={ui.body}>
+            {user.taste.score === null
+              ? `You’ve both ranked ${user.taste.shared} of the same ${
+                  user.taste.shared === 1 ? 'song' : 'songs'
+                }. Rank at least 3 in common to see a match.`
+              : `Based on the ${user.taste.shared} songs you’ve both ranked. 100% means your scores agree exactly.`}
+          </Text>
+          {shared.map(s => (
+            <Pressable
+              key={s.item.id}
+              accessibilityRole="button"
+              onPress={() => open(s.item.id)}
+              style={ui.between}
+            >
+              <Text style={[ui.musicTitle, { flex: 1 }]} numberOfLines={1}>
+                {s.item.title}
+              </Text>
+              <Text style={ui.body}>
+                You {s.yours.toFixed(2)} · Them {s.score.toFixed(2)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      {genres.length > 0 && (
+        <View style={[ui.row, { flexWrap: 'wrap', gap: 8 }]}>
+          {genres.map(([g]) => (
+            <View key={g} style={ui.chip}>
+              <Text style={ui.chipText}>{g}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
       <View style={ui.between}>
-        <Text style={ui.heading}>
-          {tab === 'Saved'
-            ? 'Your listening queue'
-            : `${own ? 'Your' : 'Their'} rankings`}
-        </Text>
-        <Text style={ui.body}>{visible.length} titles</Text>
+        <Text style={ui.heading}>Their rankings</Text>
+        <Text style={ui.body}>{load.ranked.length} songs</Text>
       </View>
       {visible.map((r, i) => (
         <MusicRow
-          key={r.musicId}
-          item={findMusic(r.musicId)}
+          key={r.item.id}
+          item={r.item}
           score={r.score}
-          rank={tab === 'Saved' ? undefined : i + 1}
-          onPress={() => open(r.musicId)}
+          rank={i + 1}
+          onPress={() => open(r.item.id)}
         />
       ))}
-      {!visible.length && (
-        <Empty
-          title={
-            tab === 'Saved'
-              ? 'Room for your next discovery'
-              : 'Every list starts with one'
-          }
-          body={
-            own
-              ? 'Discover music and add it to your collection.'
-              : 'This listener hasn’t ranked any songs yet.'
-          }
-        />
+      {load.ranked.length > PREVIEW && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setShowAll(v => !v)}
+          style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Text style={ui.link}>
+            {showAll ? 'Show fewer' : `Show all ${load.ranked.length}`}
+          </Text>
+        </Pressable>
       )}
-      {own && (
-        <Button
-          secondary
-          title="Log out"
-          onPress={() =>
-            Alert.alert('Log out of AUX?', `You're logged in as @${name}.`, [
-              { text: 'Stay logged in', style: 'cancel' },
-              { text: 'Log out', style: 'destructive', onPress: logOut },
-            ])
-          }
-        />
+      {!load.ranked.length && (
+        <Empty title="Nothing ranked yet" body="Once they rank songs, their list shows up here." />
       )}
     </Page>
   );

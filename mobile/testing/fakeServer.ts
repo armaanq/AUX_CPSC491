@@ -16,6 +16,7 @@ export const fakeUser = {
   bio: '',
   avatarUrl: null,
   favoriteGenres: [],
+  onboardedAt: '2026-10-06T00:00:00.000Z' as string | null,
   createdAt: '2026-10-06T00:00:00.000Z',
 };
 
@@ -42,7 +43,9 @@ export type Call = { method: string; path: string; body?: any; auth?: string };
 export function fakeServer(
   songs: FakeSong[],
   ranked: [FakeSong, Sentiment][] = [],
+  { onboarded = true }: { onboarded?: boolean } = {},
 ) {
+  let me = { ...fakeUser, onboardedAt: onboarded ? fakeUser.onboardedAt : null };
   let clock = 0;
   const stamp = () =>
     new Date(Date.UTC(2026, 9, 1, 0, 0, clock++)).toISOString();
@@ -82,7 +85,20 @@ export function fakeServer(
       failure = null;
       return reply(status, { message });
     }
-    if (path === '/me') return reply(200, fakeUser);
+    if (path === '/me' && method === 'GET') return reply(200, me);
+    if (path === '/me' && method === 'PATCH') {
+      me = { ...me, bio: body.bio.trim() };
+      return reply(200, me);
+    }
+    if (path === '/me/onboarded') {
+      me = { ...me, onboardedAt: me.onboardedAt ?? stamp() };
+      return reply(200, me);
+    }
+    // Nobody else is on this server: no friends, nobody to find.
+    if (path === '/friends' && method === 'GET')
+      return reply(200, { friends: [], incoming: [], outgoing: [] });
+    if (path.startsWith('/users') && method === 'GET') return reply(200, { users: [] });
+    if (path.startsWith('/friends/songs/')) return reply(200, { scores: [] });
     if (path === '/me/rankings' && method === 'GET')
       return (held ?? Promise.resolve()).then(() => reply(200, list()));
     if (path === '/songs/resolve') {
@@ -92,6 +108,10 @@ export function fakeServer(
         : reply(404, { message: 'Unknown song' });
     }
     const match = path.match(/^\/me\/rankings\/(.+)$/);
+    if (match && method === 'DELETE') {
+      rows = rows.filter(r => r.song.id !== match[1]);
+      return reply(200, list());
+    }
     if (match && method === 'PUT') {
       const song = songs.find(s => s.id === match[1])!;
       const previous = rows.find(r => r.song.id === song.id);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, Pressable, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type {
   NativeStackNavigationProp,
@@ -7,14 +7,15 @@ import type {
 } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { getAlbum, SOURCE_NAMES } from '../api/songs';
+import { getFriendScores, type FriendScore } from '../api/users';
 import {
   findMusic,
   music,
   musicFromSearch,
-  people,
   registerMusic,
   type Music,
 } from '../data/prototype';
+import { useFriends } from '../state/FriendsProvider';
 import { usePrototype } from '../state/PrototypeProvider';
 import { useRankings } from '../state/RankingsProvider';
 import { useSongStats } from '../state/useSongStats';
@@ -32,6 +33,7 @@ import {
   PreviewCredit,
   useStopPreviewOnBlur,
 } from '../components/PlayableCover';
+import { Avatar } from '../components/Avatar';
 const useNav = () =>
   useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -91,8 +93,8 @@ export function MusicDetailScreen({
   route,
 }: NativeStackScreenProps<RootStackParamList, 'MusicDetail'>) {
   const nav = useNav();
-  const { state, toggleSaved, toggleFavorite } = usePrototype();
-  const { rankings } = useRankings();
+  const { state, toggleSaved } = usePrototype();
+  const { rankings, unrank } = useRankings();
   useStopPreviewOnBlur();
   const item = findMusic(route.params.musicId);
   if (!item)
@@ -106,7 +108,15 @@ export function MusicDetailScreen({
     );
   const ranking = rankings.find(r => r.musicId === item.id);
   const saved = state.saved.includes(item.id);
-  const favorite = state.favorites.includes(item.id);
+  const confirmUnrank = () =>
+    Alert.alert(
+      'Remove from your rankings?',
+      `“${item.title}” leaves your library, and the songs around it shift up.`,
+      [
+        { text: 'Keep it', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => unrank(item.id) },
+      ],
+    );
   return (
     <Page insetTop={false}>
       <View style={{ alignItems: 'center', gap: 14 }}>
@@ -152,13 +162,9 @@ export function MusicDetailScreen({
           }
           onPress={() => toggleSaved(item.id)}
         />
-        <Button
-          secondary
-          title={
-            favorite ? '♥ Pinned to profile · Unpin' : '♡ Pin to your favorites'
-          }
-          onPress={() => toggleFavorite(item.id)}
-        />
+        {ranking && (
+          <Button secondary title="Remove from my rankings" onPress={confirmUnrank} />
+        )}
         {item.externalUrl && item.source && (
           // Apple Music and Spotify ask apps showing their data to link back to them.
           <Button
@@ -190,42 +196,55 @@ export function MusicDetailScreen({
           </Text>
         </>
       )}
-      {item.kind === 'song' && <Text style={ui.heading}>From your circle</Text>}
-      {item.kind === 'song' &&
-        people
-          .filter(
-            p =>
-              state.connections[p.id] === 'friends' &&
-              p.rankings.some(r => r.musicId === item.id),
-          )
-          .map(p => (
-            <Pressable
-              key={p.id}
-              accessibilityRole="button"
-              style={ui.card}
-              onPress={() => nav.navigate('FriendProfile', { friendId: p.id })}
-            >
-              <View style={ui.between}>
-                <Text style={ui.musicTitle}>@{p.name}</Text>
-                <Text style={ui.heading}>
-                  {p.rankings
-                    .find(r => r.musicId === item.id)!
-                    .score.toFixed(2)}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-      {item.kind === 'song' &&
-        !people.some(
-          p =>
-            state.connections[p.id] === 'friends' &&
-            p.rankings.some(r => r.musicId === item.id),
-        ) && (
-          <Text style={ui.body}>
-            No friends have ranked this yet. Start the conversation.
-          </Text>
-        )}
+      {item.kind === 'song' && <FriendCircle item={item} />}
     </Page>
+  );
+}
+/** Your friends' scores for this song. */
+function FriendCircle({ item }: { item: Music }) {
+  const nav = useNav();
+  const { friends } = useFriends();
+  const [scores, setScores] = useState<FriendScore[] | null>(null);
+  const { songId } = item;
+  const friendCount = friends.length;
+  useEffect(() => {
+    // No AUX id means nobody has ranked it, friends included.
+    if (!songId || !friendCount) {
+      setScores([]);
+      return;
+    }
+    let current = true;
+    getFriendScores(songId)
+      .then(res => current && setScores(res.scores))
+      .catch(() => current && setScores([]));
+    return () => {
+      current = false;
+    };
+  }, [songId, friendCount]);
+  return (
+    <>
+      <Text style={ui.heading}>From your circle</Text>
+      {scores?.map(s => (
+        <Pressable
+          key={s.user.id}
+          accessibilityRole="button"
+          accessibilityLabel={`@${s.user.username} scored it ${s.score.toFixed(2)}`}
+          style={[ui.card, ui.row, { paddingVertical: 12 }]}
+          onPress={() => nav.navigate('FriendProfile', { userId: s.user.id })}
+        >
+          <Avatar seed={s.user.id} name={s.user.username} size={36} />
+          <Text style={[ui.musicTitle, { flex: 1 }]}>@{s.user.username}</Text>
+          <Text style={[ui.heading, { color: scoreTone(s.score) }]}>{s.score.toFixed(2)}</Text>
+        </Pressable>
+      ))}
+      {scores?.length === 0 && (
+        <Text style={ui.body}>
+          {friendCount
+            ? 'None of your friends have ranked this yet.'
+            : 'Add friends to see how they score it.'}
+        </Text>
+      )}
+    </>
   );
 }
 type Tracklist = {
