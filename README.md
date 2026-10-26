@@ -60,3 +60,21 @@ The API starts on `http://localhost:3000`. `GET /health` returns `{ "status": "o
 ## Workflow
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branching, commit, and PR conventions.
+
+### Profile settings
+
+Open your profile, then **Profile settings** to choose/remove a profile photo,
+edit your bio, or permanently delete your account. Deletion requires your current
+password and a final confirmation; the server deletes the user and cascades to
+rankings, saved items, favorites, and friendships. Existing tokens for deleted
+accounts are rejected on authenticated routes.
+
+Photos are resized on-device and saved in the existing `avatarUrl` field as JPEG
+or PNG data URLs (maximum 256 KiB). No new database migration or storage service
+is needed for this feature. The API accepts JSON bodies up to 400 KiB.
+
+The mobile app now depends on `react-native-image-picker`. Install iOS pods in
+`mobile/ios` and rebuild the native app before testing photo selection on a device.
+Android picks up the native module through React Native autolinking. Test picker
+cancellation, permission errors, photo persistence after signing in again, and
+account deletion on a development account before releasing.

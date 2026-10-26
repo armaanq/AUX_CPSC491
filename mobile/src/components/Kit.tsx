@@ -140,19 +140,23 @@ export function Button({
   title,
   onPress,
   secondary = false,
+  disabled = false,
 }: {
   title: string;
   onPress: () => void;
   secondary?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [
         ui.button,
         secondary && { backgroundColor: palette.soft },
-        { opacity: pressed ? 0.65 : 1 },
+        { opacity: disabled ? 0.45 : pressed ? 0.65 : 1 },
       ]}
     >
       <Text style={[ui.buttonText, secondary && { color: palette.ink }]}>

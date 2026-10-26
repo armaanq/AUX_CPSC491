@@ -8,3 +8,6 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // __tests__/splash.test.tsx covers the real one.
 // eslint-disable-next-line no-undef
 jest.mock('./src/components/Splash', () => ({ Splash: () => null }));
+
+// eslint-disable-next-line no-undef
+jest.mock('react-native-image-picker', () => ({ launchImageLibrary: jest.fn() }));

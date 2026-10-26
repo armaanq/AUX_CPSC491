@@ -35,7 +35,7 @@ export function getMe() {
 }
 
 /** Edits what other people see on your profile. */
-export function updateProfile(changes: { bio: string }) {
+export function updateProfile(changes: { bio?: string; avatarUrl?: string | null }) {
   return request<User>('/me', {
     method: 'PATCH',
     body: JSON.stringify(changes),
@@ -45,4 +45,8 @@ export function updateProfile(changes: { bio: string }) {
 /** Marks first-run setup done. Safe to repeat. */
 export function completeOnboarding() {
   return request<User>('/me/onboarded', { method: 'POST' });
+}
+
+export function deleteAccount(password: string) {
+  return request<{ deleted: true }>('/me', { method: 'DELETE', body: JSON.stringify({ password }) });
 }

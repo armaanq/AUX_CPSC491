@@ -110,7 +110,7 @@ export function FriendsDrawer() {
         onPress={() => open(u)}
         style={[ui.row, { flex: 1 }]}
       >
-        <Avatar seed={u.id} name={u.username} size={42} />
+        <Avatar avatarUrl={u.avatarUrl} seed={u.id} name={u.username} size={42} />
         <View style={{ flex: 1 }}>
           <Text style={ui.musicTitle} numberOfLines={1}>
             @{u.username}
