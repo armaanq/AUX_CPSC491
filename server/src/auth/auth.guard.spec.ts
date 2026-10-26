@@ -1,13 +1,14 @@
 import { UnauthorizedException, type ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import type { PrismaService } from '../prisma/prisma.service.js';
 import { AuthGuard, type AuthedRequest } from './auth.guard.js';
 import { jwtOptions } from './auth.module.js';
 
 process.env.JWT_SECRET = 'test-secret-'.padEnd(40, 'x');
 const jwt = new JwtService(jwtOptions());
 
-function run(authorization: string | undefined, isPublic = false) {
+function run(authorization: string | undefined, isPublic = false, exists = true) {
   const req = { headers: { authorization } } as unknown as AuthedRequest;
   const reflector = {
     getAllAndOverride: vi.fn().mockReturnValue(isPublic),
@@ -17,10 +18,14 @@ function run(authorization: string | undefined, isPublic = false) {
     getClass: () => undefined,
     switchToHttp: () => ({ getRequest: () => req }),
   } as unknown as ExecutionContext;
-  return { result: new AuthGuard(jwt, reflector).canActivate(ctx), req };
+  return { result: new AuthGuard(jwt, reflector, { user: { findUnique: vi.fn().mockResolvedValue(exists ? { id: 'user-1' } : null) } } as unknown as PrismaService).canActivate(ctx), req };
 }
 
 describe('AuthGuard', () => {
+  it('rejects a valid token for a deleted account', async () => {
+    const token = await jwt.signAsync({ sub: 'user-1' });
+    await expect(run(`Bearer ${token}`, false, false).result).rejects.toThrow(UnauthorizedException);
+  });
   it('lets public routes through without a token', async () => {
     await expect(run(undefined, true).result).resolves.toBe(true);
   });

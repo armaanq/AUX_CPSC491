@@ -120,7 +120,7 @@ export function FriendProfileScreen({
   return (
     <Page insetTop={false}>
       <View style={ui.row}>
-        <Avatar seed={user.id} name={user.username} size={76} />
+        <Avatar avatarUrl={user.avatarUrl} seed={user.id} name={user.username} size={76} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[ui.title, { fontSize: 28 }]} numberOfLines={1}>
             @{user.username}

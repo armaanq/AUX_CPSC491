@@ -87,7 +87,7 @@ export function TopBar({ title, kicker }: { title: string; kicker?: string }) {
         hitSlop={8}
         style={{ width: 44, height: 44, alignItems: 'flex-end', justifyContent: 'center' }}
       >
-        <Avatar seed="me" name={user?.username ?? ''} size={34} />
+        <Avatar avatarUrl={user?.avatarUrl} seed="me" name={user?.username ?? ''} size={34} />
       </Pressable>
     </View>
   );

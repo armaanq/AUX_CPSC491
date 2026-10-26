@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Patch, Post } from '@nestjs/common';
 import { CurrentUserId } from '../auth/current-user.decorator.js';
 import {
   UsersService,
@@ -23,6 +23,11 @@ export class MeController {
     @Body() body: ProfileBody | undefined,
   ): Promise<SelfUser> {
     return this.users.updateProfile(userId, body ?? {});
+  }
+
+  @Delete()
+  deleteAccount(@CurrentUserId() userId: string, @Body() body: { password?: unknown } | undefined) {
+    return this.users.deleteAccount(userId, body?.password);
   }
 
   /** POST /me/onboarded — first-run setup (importing a playlist) is done. */

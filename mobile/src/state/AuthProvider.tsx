@@ -8,6 +8,7 @@ import React, {
 import * as Keychain from 'react-native-keychain';
 import {
   completeOnboarding,
+  deleteAccount as apiDeleteAccount,
   getMe,
   login as apiLogin,
   signup as apiSignup,
@@ -40,6 +41,8 @@ type API = {
   retry: () => Promise<void>;
   /** Saves your bio to your account. Throws if the server refuses it. */
   saveBio: (bio: string) => Promise<void>;
+  saveProfile: (changes: { bio?: string; avatarUrl?: string | null }) => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
   /** Marks first-run setup done; the app then opens on the Rank tab once. */
   finishOnboarding: () => Promise<void>;
   /** True right after finishing first-run setup, until the next login. */
@@ -119,6 +122,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logOut,
         retry: restore,
         saveBio: async bio => setUser(await updateProfile({ bio })),
+        saveProfile: async changes => setUser(await updateProfile(changes)),
+        deleteAccount: async password => {
+          await apiDeleteAccount(password);
+          await logOut();
+        },
         finishOnboarding: async () => {
           setUser(await completeOnboarding());
           setFirstRun(true);

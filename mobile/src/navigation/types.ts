@@ -19,4 +19,5 @@ export type RootStackParamList = {
   MusicDetail: { musicId: string };
   FriendProfile: { userId: string };
   Profile: undefined;
+  ProfileSettings: undefined;
 };

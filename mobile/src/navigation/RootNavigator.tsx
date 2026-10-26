@@ -10,6 +10,7 @@ import {
 import { CompareScreen } from '../screens/CompareScreen';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { FriendProfileScreen } from '../screens/SocialScreens';
+import { ProfileSettingsScreen } from '../screens/ProfileSettingsScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { useAuth } from '../state/AuthProvider';
 import { colors } from '../theme/theme';
@@ -61,6 +62,7 @@ export function RootNavigator() {
               component={CompareScreen}
               options={{ presentation: 'modal' }}
             />
+            <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} options={{ headerShown: true, headerTitle: 'Profile settings', headerBackTitle: 'Back' }} />
             <Stack.Screen
               name="Profile"
               component={ProfileScreen}

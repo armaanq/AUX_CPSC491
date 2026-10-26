@@ -117,8 +117,9 @@ export function ProfileScreen() {
 
   return (
     <Page insetTop={false}>
+      <Button secondary title="Profile settings" onPress={() => nav.navigate('ProfileSettings')} />
       <View style={{ alignItems: 'center', gap: 8 }}>
-        <Avatar seed="me" name={name} size={84} />
+        <Avatar avatarUrl={user?.avatarUrl} seed="me" name={name} size={84} />
         <Text style={[ui.title, { fontSize: 30 }]}>@{name}</Text>
         {since && <Text style={ui.fine}>On AUX since {since}</Text>}
       </View>

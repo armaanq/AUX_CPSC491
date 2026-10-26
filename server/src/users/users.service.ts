@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   Injectable,
+  ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { verifyPassword } from '../auth/password.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -22,6 +24,7 @@ export type SelfUser = Prisma.UserGetPayload<{ select: typeof selfSelect }>;
 
 export interface ProfileBody {
   bio?: unknown;
+  avatarUrl?: unknown;
 }
 
 export const BIO_MAX = 160;
@@ -43,22 +46,46 @@ export class UsersService {
     return user;
   }
 
-  /** Edits what other people see on your profile. Only the bio, for now. */
+  /** Save small raster avatars directly with the account so they survive reinstalls. */
   async updateProfile(id: string, body: ProfileBody): Promise<SelfUser> {
-    const { bio } = body;
-    if (typeof bio !== 'string') {
-      throw new BadRequestException('bio must be text');
+    const data: { bio?: string; avatarUrl?: string | null } = {};
+    if (body.bio !== undefined) {
+      if (typeof body.bio !== 'string' || body.bio.trim().length > BIO_MAX)
+        throw new BadRequestException(`Bios must be text, at most ${BIO_MAX} characters.`);
+      data.bio = body.bio.trim();
     }
-    const trimmed = bio.trim();
-    if (trimmed.length > BIO_MAX) {
-      throw new BadRequestException(`Bios are ${BIO_MAX} characters at most.`);
+    if (body.avatarUrl !== undefined) {
+      const value = body.avatarUrl;
+      if (value === null) data.avatarUrl = null;
+      else {
+        if (typeof value !== 'string' || value.length > 350000)
+          throw new BadRequestException('Choose a photo smaller than 256 KB.');
+        const match = /^data:image\/(jpeg|png);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+        if (!match) throw new BadRequestException('Choose a JPEG or PNG photo.');
+        const bytes = Buffer.from(match[2], 'base64');
+        const valid = match[1] === 'jpeg'
+          ? bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
+          : bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        if (!valid || bytes.length > 256 * 1024 || bytes.toString('base64') !== match[2])
+          throw new BadRequestException('Choose a valid JPEG or PNG smaller than 256 KB.');
+        data.avatarUrl = value;
+      }
     }
+    if (!Object.keys(data).length) throw new BadRequestException('No profile changes supplied.');
     await this.findSelf(id);
-    return this.prisma.user.update({
-      where: { id },
-      data: { bio: trimmed },
-      select: selfSelect,
-    });
+    return this.prisma.user.update({ where: { id }, data, select: selfSelect });
+  }
+
+  async deleteAccount(id: string, password: unknown): Promise<{ deleted: true }> {
+    if (typeof password !== 'string' || !password || password.length > 1024)
+      throw new BadRequestException('Enter your current password.');
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new UnauthorizedException('This account no longer exists.');
+    if (!(await verifyPassword(password, user.passwordHash)))
+      throw new ForbiddenException('Your password is incorrect.');
+    // Foreign keys cascade to rankings, saved items, favorites, and both sides of friendships.
+    await this.prisma.user.delete({ where: { id } });
+    return { deleted: true };
   }
 
   /** Marks first-run setup done. Safe to repeat: the first time is kept. */
