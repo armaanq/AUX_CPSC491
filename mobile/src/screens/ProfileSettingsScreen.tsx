@@ -7,7 +7,7 @@ import { useAuth } from '../state/AuthProvider';
 
 export function ProfileSettingsScreen() {
   const { user, saveProfile, deleteAccount } = useAuth();
-  const [bio, setBio] = useState(user?.bio ?? '');
+  // Your bio is edited on the profile page itself.
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -61,14 +61,6 @@ export function ProfileSettingsScreen() {
         {!!user?.avatarUrl && <Button secondary title="Remove photo" disabled={busy} onPress={() => run(async () => {
           await saveProfile({ avatarUrl: null }); setMessage('Profile photo removed.');
         })} />}
-      </View>
-      <View style={ui.card}>
-        <Text style={ui.heading}>About you</Text>
-        <TextInput accessibilityLabel="Profile bio" style={ui.input} multiline maxLength={160} value={bio} onChangeText={setBio} editable={!busy} />
-        <Text style={ui.fine}>{bio.length}/160</Text>
-        <Button title="Save bio" disabled={busy} onPress={() => run(async () => {
-          await saveProfile({ bio: bio.trim() }); setMessage('Bio saved.');
-        })} />
       </View>
       <View style={[ui.card, { borderColor: palette.accent }]}>
         <Text style={[ui.heading, { color: palette.accent }]}>Delete account</Text>

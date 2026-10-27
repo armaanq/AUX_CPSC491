@@ -30,8 +30,6 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Choose a profile photo for your AUX account.</string>
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 		<key>NSAllowsLocalNetworking</key>
