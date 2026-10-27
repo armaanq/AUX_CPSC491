@@ -63,8 +63,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for branching, commit, and PR conventions
 
 ### Profile settings
 
-Open your profile, then **Profile settings** to choose/remove a profile photo,
-edit your bio, or permanently delete your account. Deletion requires your current
+Open your profile, then **Profile settings** to choose/remove a profile photo
+or permanently delete your account. Your bio is edited on the profile page itself. Deletion requires your current
 password and a final confirmation; the server deletes the user and cascades to
 rankings, saved items, favorites, and friendships. Existing tokens for deleted
 accounts are rejected on authenticated routes.
