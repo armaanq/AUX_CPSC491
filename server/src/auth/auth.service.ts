@@ -8,6 +8,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { selfSelect, type SelfUser } from '../users/users.service.js';
+import {
+  AttemptLimiter,
+  AUTH_WINDOW_MS,
+  tooManyAttempts,
+} from './attempt-limiter.js';
 import { dummyHash, hashPassword, verifyPassword } from './password.js';
 
 export interface AuthResponse {
@@ -31,6 +36,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME = /^[a-z0-9_.]{3,20}$/;
 export const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 128;
+export const LOGIN_FAILURES_PER_ACCOUNT = 10;
 
 /** Emails and usernames are case-insensitive, so they're stored lowercase. */
 const normalized = (v: unknown) =>
@@ -38,6 +44,12 @@ const normalized = (v: unknown) =>
 
 @Injectable()
 export class AuthService {
+  /** Wrong passwords per account per window before login pauses for that account. */
+  private readonly failedLogins = new AttemptLimiter(
+    LOGIN_FAILURES_PER_ACCOUNT,
+    AUTH_WINDOW_MS,
+  );
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -113,13 +125,22 @@ export class AuthService {
         })
       : null;
 
+    // Counted per account, so switching between email and username doesn't
+    // reset it. Unknown names are counted too, so they're limited the same way.
+    const key = found?.id ?? identifier;
+    const wait = key ? this.failedLogins.retryAfter(key) : 0;
+    if (wait) throw tooManyAttempts(wait);
+
     const valid = await verifyPassword(
       password,
       found?.passwordHash ?? (await dummyHash()),
     );
     // Same message either way, so it doesn't reveal which emails/usernames exist.
-    if (!found || !valid)
+    if (!found || !valid) {
+      if (key) this.failedLogins.record(key);
       throw new UnauthorizedException('Incorrect email/username or password.');
+    }
+    this.failedLogins.clear(key);
 
     const { passwordHash: _hash, ...user } = found;
     return this.session(user);

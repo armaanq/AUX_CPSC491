@@ -7,7 +7,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { jwtOptions } from './auth.module.js';
-import { AuthService } from './auth.service.js';
+import { AuthService, LOGIN_FAILURES_PER_ACCOUNT } from './auth.service.js';
 import { hashPassword } from './password.js';
 
 process.env.JWT_SECRET = 'test-secret-'.padEnd(40, 'x');
@@ -161,6 +161,37 @@ describe('AuthService.login', () => {
     await expect(unknownUser).rejects.toThrow(
       'Incorrect email/username or password.',
     );
+  });
+
+  it('pauses logins to an account after too many wrong passwords, by email or username', async () => {
+    const { service } = await withAccount();
+    for (let i = 0; i < LOGIN_FAILURES_PER_ACCOUNT; i++) {
+      // Alternating names still counts against the one account.
+      const identifier = i % 2 ? 'armaan' : 'armaan@example.com';
+      await expect(
+        service.login({ identifier, password: 'wrong-guess' }),
+      ).rejects.toThrow(UnauthorizedException);
+    }
+    // Even the right password waits until the window ends.
+    await expect(
+      service.login({ identifier: 'armaan', password: 'longenough' }),
+    ).rejects.toThrow('Too many attempts');
+  });
+
+  it('resets the count after a successful login', async () => {
+    const { service } = await withAccount();
+    for (let i = 0; i < LOGIN_FAILURES_PER_ACCOUNT - 1; i++) {
+      await expect(
+        service.login({ identifier: 'armaan', password: 'wrong-guess' }),
+      ).rejects.toThrow(UnauthorizedException);
+    }
+    await service.login({ identifier: 'armaan', password: 'longenough' });
+    // Without the reset, the second of these would hit the limit.
+    for (let i = 0; i < 2; i++) {
+      await expect(
+        service.login({ identifier: 'armaan', password: 'wrong-guess' }),
+      ).rejects.toThrow('Incorrect email/username or password.');
+    }
   });
 
   it('rejects a missing identifier or password', async () => {

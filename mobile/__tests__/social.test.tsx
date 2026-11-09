@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, TextInput } from 'react-native';
+import { Alert, Text, TextInput } from 'react-native';
 import TestRenderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Keychain from 'react-native-keychain';
@@ -77,11 +77,13 @@ const texts = (r: Pick<Renderer, 'root'>) =>
     .map(t => [t.props.children].flat().join(''))
     .join('\n');
 const settle = () => act(async () => new Promise(res => setTimeout(res, 0)));
+const mounted: Renderer[] = [];
 async function launch() {
   let r: Renderer;
   await act(async () => {
     r = TestRenderer.create(<App />);
   });
+  mounted.push(r!);
   await settle();
   await settle();
   return r!;
@@ -109,6 +111,13 @@ beforeEach(async () => {
     'GET /charts': () => ({ songs: [janice], albums: [] }),
     'GET /users': () => ({ users: [] }),
   };
+});
+
+// Let the friends drawer finish its 220 ms slide, then unmount, so no
+// animation updates the app after Jest has torn the test down.
+afterEach(async () => {
+  await act(async () => new Promise(res => setTimeout(res, 300)));
+  await act(async () => mounted.splice(0).forEach(r => r.unmount()));
 });
 
 describe('first-run setup', () => {
@@ -167,6 +176,43 @@ describe('friends', () => {
     expect(called('POST', `/friends/${arian.id}`)).toBe(1);
     expect(texts(r)).toContain('SENT');
     expect(texts(r)).toContain('Requested');
+  });
+
+  it('reports a listener, then blocks them and leaves their profile', async () => {
+    const arian = person(3, 'arian');
+    routes['GET /users'] = () => ({ users: [arian] });
+    routes[`GET /users/${arian.id}`] = () => ({ user: arian, rankings: [] });
+    let report: unknown;
+    routes[`POST /users/${arian.id}/report`] = body => {
+      report = body;
+      return { reported: true };
+    };
+    routes[`PUT /me/blocks/${arian.id}`] = () => ({ blocked: true });
+    // Answer each dialog by tapping the named button.
+    const answers: string[] = [];
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+      const answer = answers.shift();
+      buttons?.find(b => b.text === answer)?.onPress?.();
+    });
+    const r = await launch();
+    await press(r, 'Friends');
+    await press(r, 'Open @arian');
+    expect(texts(r)).toContain('Their rankings');
+
+    answers.push('Harassment or bullying', 'Block', 'Block');
+    await press(r, 'Report @arian');
+    await settle();
+    expect(report).toEqual({ reason: 'HARASSMENT' });
+    expect(alert.mock.calls.map(c => c[0])).toEqual([
+      'Report @arian?',
+      'Thanks for telling us',
+      'Block @arian?',
+    ]);
+    expect(called('PUT', `/me/blocks/${arian.id}`)).toBe(1);
+    // Friends reload (the friendship is gone), and you're taken off their profile.
+    expect(called('GET', '/friends')).toBeGreaterThan(1);
+    expect(texts(r)).not.toContain('Their rankings');
+    alert.mockRestore();
   });
 
   it('opens a listener’s profile with your taste match and their rankings', async () => {
