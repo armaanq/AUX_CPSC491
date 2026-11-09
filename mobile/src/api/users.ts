@@ -75,3 +75,38 @@ export function removeFriend(userId: string) {
 export function getFriendScores(songId: string) {
   return request<{ scores: FriendScore[] }>(`/friends/songs/${songId}`);
 }
+
+/** Someone you've blocked. */
+export type BlockedUser = { id: string; username: string };
+
+/** People you've blocked, most recent first. */
+export function getBlocked() {
+  return request<{ users: BlockedUser[] }>('/me/blocks');
+}
+
+/** Hides you from each other and ends any friendship. */
+export function blockUser(userId: string) {
+  return request<{ blocked: true }>(`/me/blocks/${userId}`, { method: 'PUT' });
+}
+
+export function unblockUser(userId: string) {
+  return request<{ blocked: false }>(`/me/blocks/${userId}`, { method: 'DELETE' });
+}
+
+export type ReportReason = 'OFFENSIVE_PROFILE' | 'HARASSMENT' | 'SPAM' | 'OTHER';
+
+/** What each reason is called in the app. */
+export const REPORT_REASONS: { reason: ReportReason; label: string }[] = [
+  { reason: 'OFFENSIVE_PROFILE', label: 'Offensive name, bio or photo' },
+  { reason: 'HARASSMENT', label: 'Harassment or bullying' },
+  { reason: 'SPAM', label: 'Spam or fake account' },
+  { reason: 'OTHER', label: 'Something else' },
+];
+
+/** Sends a report to the AUX team. */
+export function reportUser(userId: string, reason: ReportReason) {
+  return request<{ reported: true }>(`/users/${userId}/report`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}

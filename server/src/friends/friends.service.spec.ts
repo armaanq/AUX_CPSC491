@@ -14,6 +14,12 @@ const user = (n: number, username: string, rankings = 0) => ({
   _count: { rankings },
 });
 
+/** The search/profile filter that hides users blocked in either direction. */
+const visibleToMe = {
+  blocking: { none: { blockedId: ME } },
+  blockedBy: { none: { blockerId: ME } },
+};
+
 function setup() {
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([{ id: ME }, { id: ID(2) }]),
@@ -21,6 +27,11 @@ function setup() {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    block: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
     },
   };
   const prisma = {
@@ -32,9 +43,15 @@ function setup() {
     },
     user: {
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
       findUnique: vi.fn().mockResolvedValue(null),
     },
     ranking: { findMany: vi.fn().mockResolvedValue([]) },
+    block: {
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    report: { create: vi.fn().mockResolvedValue({ id: 'r1' }) },
   };
   const rankings = { list: vi.fn().mockResolvedValue({ rankings: [] }) };
   return {
@@ -92,14 +109,18 @@ describe('FriendsService.search', () => {
       ['marian', 'none'],
     ]);
     const args = prisma.user.findMany.mock.calls[0][0];
-    expect(args.where).toEqual({ id: { not: ME }, username: { contains: 'arian' } });
+    expect(args.where).toEqual({
+      id: { not: ME },
+      ...visibleToMe,
+      username: { contains: 'arian' },
+    });
   });
 
   it('lists the newest listeners when there is no query', async () => {
     const { service, prisma } = setup();
     await service.search(ME, '');
     const args = prisma.user.findMany.mock.calls[0][0];
-    expect(args.where).toEqual({ id: { not: ME } });
+    expect(args.where).toEqual({ id: { not: ME }, ...visibleToMe });
     expect(args.orderBy).toEqual({ createdAt: 'desc' });
   });
 
@@ -113,7 +134,7 @@ describe('FriendsService.search', () => {
 describe('FriendsService.profile', () => {
   it('returns anyone’s profile with their rankings and your status', async () => {
     const { service, prisma, rankings } = setup();
-    prisma.user.findUnique.mockResolvedValue(user(2, 'arian', 1));
+    prisma.user.findFirst.mockResolvedValue(user(2, 'arian', 1));
     prisma.friendship.findMany.mockResolvedValue([
       { requesterId: ME, addresseeId: ID(2), status: 'ACCEPTED' },
     ]);
@@ -127,7 +148,7 @@ describe('FriendsService.profile', () => {
 
   it('marks your own profile as yours', async () => {
     const { service, prisma } = setup();
-    prisma.user.findUnique.mockResolvedValue(user(1, 'me'));
+    prisma.user.findFirst.mockResolvedValue(user(1, 'me'));
     expect((await service.profile(ME, ME)).user.status).toBe('self');
   });
 
@@ -135,6 +156,17 @@ describe('FriendsService.profile', () => {
     const { service } = setup();
     await expect(service.profile(ME, ID(9))).rejects.toThrow(NotFoundException);
     await expect(service.profile(ME, 'not-an-id')).rejects.toThrow(BadRequestException);
+  });
+
+  it('hides a profile when either of you blocked the other', async () => {
+    const { service, prisma, rankings } = setup();
+    // The database leaves them out, so it looks like they aren't on AUX.
+    await expect(service.profile(ME, ID(2))).rejects.toThrow('isn’t on AUX');
+    expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({
+      id: ID(2),
+      ...visibleToMe,
+    });
+    expect(rankings.list).not.toHaveBeenCalled();
   });
 });
 
@@ -176,6 +208,96 @@ describe('FriendsService.request', () => {
     tx.$queryRaw.mockResolvedValue([{ id: ME }]);
     await expect(service.request(ME, ID(9))).rejects.toThrow(NotFoundException);
     expect(tx.friendship.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses when you blocked them, and hides that they blocked you', async () => {
+    const { service, tx } = setup();
+    tx.block.findFirst.mockResolvedValue({ blockerId: ME });
+    await expect(service.request(ME, ID(2))).rejects.toThrow('Unblock them');
+    tx.block.findFirst.mockResolvedValue({ blockerId: ID(2) });
+    await expect(service.request(ME, ID(2))).rejects.toThrow('isn’t on AUX');
+    expect(tx.friendship.create).not.toHaveBeenCalled();
+    expect(tx.friendship.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('FriendsService.block', () => {
+  it('blocks and ends any friendship in one locked transaction', async () => {
+    const { service, tx } = setup();
+    await expect(service.block(ME, ID(2))).resolves.toEqual({ blocked: true });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.block.upsert).toHaveBeenCalledWith({
+      where: { blockerId_blockedId: { blockerId: ME, blockedId: ID(2) } },
+      create: { blockerId: ME, blockedId: ID(2) },
+      update: {},
+    });
+    expect(tx.friendship.deleteMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { requesterId: ME, addresseeId: ID(2) },
+          { requesterId: ID(2), addresseeId: ME },
+        ],
+      },
+    });
+  });
+
+  it('refuses yourself and people who aren’t on AUX', async () => {
+    const { service, tx, prisma } = setup();
+    await expect(service.block(ME, ME)).rejects.toThrow(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    tx.$queryRaw.mockResolvedValue([{ id: ME }]);
+    await expect(service.block(ME, ID(9))).rejects.toThrow(NotFoundException);
+    expect(tx.block.upsert).not.toHaveBeenCalled();
+  });
+
+  it('unblocks only your own block', async () => {
+    const { service, prisma } = setup();
+    await expect(service.unblock(ME, ID(2))).resolves.toEqual({ blocked: false });
+    expect(prisma.block.deleteMany).toHaveBeenCalledWith({
+      where: { blockerId: ME, blockedId: ID(2) },
+    });
+  });
+
+  it('lists the people you blocked', async () => {
+    const { service, prisma } = setup();
+    prisma.block.findMany.mockResolvedValue([{ blocked: { id: ID(2), username: 'arian' } }]);
+    await expect(service.blocked(ME)).resolves.toEqual({
+      users: [{ id: ID(2), username: 'arian' }],
+    });
+    expect(prisma.block.findMany.mock.calls[0][0].where).toEqual({ blockerId: ME });
+  });
+});
+
+describe('FriendsService.report', () => {
+  it('saves a report for the team with the reason and trimmed details', async () => {
+    const { service, prisma } = setup();
+    prisma.user.findUnique.mockResolvedValue({ id: ID(2) });
+    await expect(
+      service.report(ME, ID(2), { reason: 'HARASSMENT', details: '  rude messages  ' }),
+    ).resolves.toEqual({ reported: true });
+    expect(prisma.report.create.mock.calls[0][0].data).toEqual({
+      reporterId: ME,
+      reportedId: ID(2),
+      reason: 'HARASSMENT',
+      details: 'rude messages',
+    });
+  });
+
+  it('rejects a bad reason, overlong details, yourself, and unknown users', async () => {
+    const { service, prisma } = setup();
+    await expect(service.report(ME, ID(2), { reason: 'BORING' })).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(
+      service.report(ME, ID(2), { reason: 'OTHER', details: 'x'.repeat(501) }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(service.report(ME, ME, { reason: 'SPAM' })).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.report(ME, ID(9), { reason: 'SPAM' })).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(prisma.report.create).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,5 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { AuthRateLimitGuard } from './auth-rate-limit.guard.js';
 import {
   AuthService,
   type AuthResponse,
@@ -8,6 +9,7 @@ import {
 import { Public } from './public.decorator.js';
 
 @Public()
+@UseGuards(AuthRateLimitGuard)
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}

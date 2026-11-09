@@ -1,9 +1,14 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma, Sentiment } from '../generated/prisma/client.js';
+import type {
+  Prisma,
+  ReportReason,
+  Sentiment,
+} from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   RankingsService,
@@ -16,6 +21,13 @@ const USERNAME_QUERY = /^[a-z0-9_.]{1,20}$/;
 const SEARCH_LIMIT = 20;
 /** A taste match needs this many songs both people ranked before it means anything. */
 export const TASTE_MIN_SHARED = 3;
+export const REPORT_REASONS = [
+  'OFFENSIVE_PROFILE',
+  'HARASSMENT',
+  'SPAM',
+  'OTHER',
+] as const satisfies readonly ReportReason[];
+export const REPORT_DETAILS_MAX = 500;
 
 /** How you're connected to another user, from your side. */
 export type FriendStatus = 'self' | 'friends' | 'incoming' | 'outgoing' | 'none';
@@ -59,6 +71,17 @@ export interface FriendScore {
   score: number;
 }
 
+/** Someone you've blocked, listed so you can unblock them. */
+export interface BlockedUser {
+  id: string;
+  username: string;
+}
+
+export interface ReportBody {
+  reason?: unknown;
+  details?: unknown;
+}
+
 const publicSelect = {
   id: true,
   username: true,
@@ -74,6 +97,8 @@ type Db = Prisma.TransactionClient;
 
 @Injectable()
 export class FriendsService {
+  private readonly log = new Logger(FriendsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rankings: RankingsService,
@@ -125,6 +150,7 @@ export class FriendsService {
     const found = await this.prisma.user.findMany({
       where: {
         id: { not: me },
+        ...visibleTo(me),
         ...(query ? { username: { contains: query } } : {}),
       },
       select: publicSelect,
@@ -150,11 +176,14 @@ export class FriendsService {
     };
   }
 
-  /** Anyone's profile: who they are, how you're connected, and their rankings. */
+  /**
+   * Anyone's profile: who they are, how you're connected, and their rankings.
+   * Blocked either way, it looks like they aren't on AUX.
+   */
   async profile(me: string, userId: string): Promise<ProfileResponse> {
     checkUserId(userId);
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, ...visibleTo(me) },
       select: publicSelect,
     });
     if (!user) throw new NotFoundException('That listener isn’t on AUX.');
@@ -180,6 +209,17 @@ export class FriendsService {
       // Two people adding each other at once must end as one friendship.
       const locked = await lockPair(tx, me, userId);
       if (locked < 2) throw new NotFoundException('That listener isn’t on AUX.');
+      const block = await tx.block.findFirst({
+        where: blockPairWhere(me, userId),
+        select: { blockerId: true },
+      });
+      if (block?.blockerId === me) {
+        throw new BadRequestException(
+          'You blocked this listener. Unblock them in Profile settings first.',
+        );
+      }
+      // Don't reveal that they blocked you.
+      if (block) throw new NotFoundException('That listener isn’t on AUX.');
       const existing = await tx.friendship.findFirst({
         where: pairWhere(me, userId),
         select: { id: true, requesterId: true, status: true },
@@ -205,6 +245,91 @@ export class FriendsService {
     checkUserId(userId);
     await this.prisma.friendship.deleteMany({ where: pairWhere(me, userId) });
     return { status: 'none' };
+  }
+
+  /**
+   * Blocks a user: you stop seeing each other in search and on profiles,
+   * neither can send a friend request, and any friendship ends. Safe to repeat.
+   */
+  async block(me: string, userId: string): Promise<{ blocked: true }> {
+    checkUserId(userId);
+    if (userId === me) {
+      throw new BadRequestException('You can’t block yourself.');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      // The same lock as friend requests, so a request can't land mid-block.
+      const locked = await lockPair(tx, me, userId);
+      if (locked < 2) throw new NotFoundException('That listener isn’t on AUX.');
+      await tx.block.upsert({
+        where: { blockerId_blockedId: { blockerId: me, blockedId: userId } },
+        create: { blockerId: me, blockedId: userId },
+        update: {},
+      });
+      await tx.friendship.deleteMany({ where: pairWhere(me, userId) });
+      return { blocked: true as const };
+    });
+  }
+
+  /** Lifts your block. Their block on you, if any, stays. Safe to repeat. */
+  async unblock(me: string, userId: string): Promise<{ blocked: false }> {
+    checkUserId(userId);
+    await this.prisma.block.deleteMany({
+      where: { blockerId: me, blockedId: userId },
+    });
+    return { blocked: false };
+  }
+
+  /** People you've blocked, most recent first. */
+  async blocked(me: string): Promise<{ users: BlockedUser[] }> {
+    const rows = await this.prisma.block.findMany({
+      where: { blockerId: me },
+      select: { blocked: { select: { id: true, username: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { users: rows.map((r) => r.blocked) };
+  }
+
+  /** Reports a user for the team to review. */
+  async report(
+    me: string,
+    userId: string,
+    body: ReportBody,
+  ): Promise<{ reported: true }> {
+    checkUserId(userId);
+    if (userId === me) {
+      throw new BadRequestException('You can’t report yourself.');
+    }
+    const { reason, details = '' } = body;
+    if (!REPORT_REASONS.includes(reason as ReportReason)) {
+      throw new BadRequestException(
+        `reason must be one of: ${REPORT_REASONS.join(', ')}`,
+      );
+    }
+    if (
+      typeof details !== 'string' ||
+      details.trim().length > REPORT_DETAILS_MAX
+    ) {
+      throw new BadRequestException(
+        `Details must be text, at most ${REPORT_DETAILS_MAX} characters.`,
+      );
+    }
+    const exists = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException('That listener isn’t on AUX.');
+    const { id } = await this.prisma.report.create({
+      data: {
+        reporterId: me,
+        reportedId: userId,
+        reason: reason as ReportReason,
+        details: details.trim(),
+      },
+      select: { id: true },
+    });
+    // Shows in Render's logs, so the team notices new reports.
+    this.log.warn(`New report ${id} (${String(reason)}) about user ${userId}`);
+    return { reported: true };
   }
 
   /** How your friends scored one song, best first. */
@@ -313,6 +438,23 @@ function pairWhere(a: string, b: string): Prisma.FriendshipWhereInput {
       { requesterId: a, addresseeId: b },
       { requesterId: b, addresseeId: a },
     ],
+  };
+}
+
+function blockPairWhere(a: string, b: string): Prisma.BlockWhereInput {
+  return {
+    OR: [
+      { blockerId: a, blockedId: b },
+      { blockerId: b, blockedId: a },
+    ],
+  };
+}
+
+/** Leaves out anyone you've blocked and anyone who has blocked you. */
+function visibleTo(me: string): Prisma.UserWhereInput {
+  return {
+    blocking: { none: { blockedId: me } },
+    blockedBy: { none: { blockerId: me } },
   };
 }
 

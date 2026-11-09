@@ -45,6 +45,10 @@ model User {
   favorites        Favorite[]
   sentRequests     Friendship[] @relation("FriendshipRequester")
   receivedRequests Friendship[] @relation("FriendshipAddressee")
+  blocking         Block[]      @relation("BlockBlocker")
+  blockedBy        Block[]      @relation("BlockBlocked")
+  reportsMade      Report[]     @relation("ReportReporter")
+  reportsReceived  Report[]     @relation("ReportReported")
 }
 
 // A song is created the first time any user ranks, saves, or favorites it
@@ -166,4 +170,45 @@ model Friendship {
 
   @@unique([requesterId, addresseeId])
   @@index([addresseeId, status])
+}
+
+/// One user blocking another. Either direction hides the two from each other:
+/// no search results, profiles or friend requests, and any friendship ends.
+model Block {
+  id        String   @id @default(uuid()) @db.Uuid
+  blockerId String   @db.Uuid
+  blockedId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  blocker User @relation("BlockBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlockBlocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+enum ReportReason {
+  OFFENSIVE_PROFILE
+  HARASSMENT
+  SPAM
+  OTHER
+}
+
+/// A user reporting another for the team to review (Apple requires a way to
+/// report users in apps where people see each other's profiles).
+model Report {
+  id         String       @id @default(uuid()) @db.Uuid
+  reporterId String       @db.Uuid
+  reportedId String       @db.Uuid
+  reason     ReportReason
+  details    String       @default("")
+  createdAt  DateTime     @default(now())
+  /// Set by the team once the report has been dealt with.
+  resolvedAt DateTime?
+
+  reporter User @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User @relation("ReportReported", fields: [reportedId], references: [id], onDelete: Cascade)
+
+  @@index([reportedId])
+  @@index([resolvedAt])
 }

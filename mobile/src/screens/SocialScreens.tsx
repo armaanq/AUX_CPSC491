@@ -6,7 +6,14 @@ import type {
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
-import { getProfile, type FriendStatus, type ProfileResponse } from '../api/users';
+import {
+  blockUser,
+  getProfile,
+  REPORT_REASONS,
+  reportUser,
+  type FriendStatus,
+  type ProfileResponse,
+} from '../api/users';
 import { findMusic, musicFromSearch, registerMusic, type Music } from '../data/prototype';
 import { useFriends } from '../state/FriendsProvider';
 import { useRankings } from '../state/RankingsProvider';
@@ -94,6 +101,47 @@ export function FriendProfileScreen({
     Alert.alert('Remove friend?', `Remove @${user.username} from your friends?`, [
       { text: 'Keep friend', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => act(friends.remove(user)) },
+    ]);
+  const confirmBlock = () =>
+    Alert.alert(
+      `Block @${user.username}?`,
+      'You won’t see each other in search or on profiles, neither of you can send a friend request, and you’ll stop being friends. You can unblock them in Profile settings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: () =>
+            blockUser(user.id).then(
+              () => {
+                // The friendship is gone on the server; refresh the drawer.
+                friends.reload();
+                if (nav.canGoBack()) nav.goBack();
+              },
+              (err: Error) => Alert.alert('Couldn’t block them', err.message),
+            ),
+        },
+      ],
+    );
+  const chooseReason = () =>
+    Alert.alert(`Report @${user.username}?`, 'What’s wrong? The AUX team reviews every report.', [
+      ...REPORT_REASONS.map(({ reason, label }) => ({
+        text: label,
+        onPress: () =>
+          reportUser(user.id, reason).then(
+            () =>
+              Alert.alert(
+                'Thanks for telling us',
+                `We’ll review @${user.username}. You can also block them so you stop seeing each other.`,
+                [
+                  { text: 'Done', style: 'cancel' },
+                  { text: 'Block', style: 'destructive', onPress: confirmBlock },
+                ],
+              ),
+            (err: Error) => Alert.alert('Couldn’t send your report', err.message),
+          ),
+      })),
+      { text: 'Cancel', style: 'cancel' as const },
     ]);
 
   // Songs you've both ranked: your score next to theirs.
@@ -225,6 +273,27 @@ export function FriendProfileScreen({
       )}
       {!load.ranked.length && (
         <Empty title="Nothing ranked yet" body="Once they rank songs, their list shows up here." />
+      )}
+
+      {status !== 'self' && (
+        <View style={[ui.row, { justifyContent: 'center', gap: 28 }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Report @${user.username}`}
+            onPress={chooseReason}
+            style={{ minHeight: 44, justifyContent: 'center' }}
+          >
+            <Text style={[ui.link, { color: palette.muted }]}>Report</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Block @${user.username}`}
+            onPress={confirmBlock}
+            style={{ minHeight: 44, justifyContent: 'center' }}
+          >
+            <Text style={[ui.link, { color: palette.muted }]}>Block</Text>
+          </Pressable>
+        </View>
       )}
     </Page>
   );

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -13,6 +14,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../state/AuthProvider';
 import { Button, Page, palette, ui } from '../components/Kit';
+import { PRIVACY_POLICY_URL, TERMS_URL } from '../data/links';
 
 const PASSWORD_MIN = 8;
 const WAKE_UP_HINT_DELAY_MS = 5000;
@@ -214,6 +216,25 @@ export function SignupScreen({
         onSubmitEditing={submit}
       />
       <ErrorText message={error} />
+      <Text style={styles.hint}>
+        By creating an account, you agree to the{' '}
+        <Text
+          accessibilityRole="link"
+          style={styles.inlineLink}
+          onPress={() => Linking.openURL(TERMS_URL)}
+        >
+          Terms of Use
+        </Text>{' '}
+        and{' '}
+        <Text
+          accessibilityRole="link"
+          style={styles.inlineLink}
+          onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
+        >
+          Privacy Policy
+        </Text>
+        , including no offensive or abusive content.
+      </Text>
       <Button
         title={busy ? 'Creating your account…' : 'Create account'}
         onPress={submit}
@@ -271,6 +292,7 @@ const styles = StyleSheet.create({
   field: { gap: 6 },
   fieldLabel: { fontSize: 13, fontWeight: '700', color: palette.ink },
   hint: { fontSize: 12, color: palette.muted },
+  inlineLink: { fontWeight: '700', color: palette.accent },
   wakeUp: {
     fontSize: 13,
     lineHeight: 18,
