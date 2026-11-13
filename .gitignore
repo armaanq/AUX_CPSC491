@@ -11,3 +11,6 @@
 
 # Private keys (the Apple Music .p8 lives outside the repo, e.g. ~/.aux/)
 *.p8
+
+# Local iOS release archives and build cache
+/build/
